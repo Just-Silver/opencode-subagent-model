@@ -1,0 +1,38 @@
+{
+  "name": "@justsilver/opencode-subagent-model",
+  "version": "0.1.0-beta.0",
+  "type": "module",
+  "description": "Force a global model for OpenCode V2 subagents and report the effective model in tool results",
+  "license": "MIT",
+  "author": "Just-Silver",
+  "homepage": "https://github.com/Just-Silver/opencode-subagent-model#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Just-Silver/opencode-subagent-model.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Just-Silver/opencode-subagent-model/issues"
+  },
+  "keywords": ["opencode", "opencode-plugin", "subagent", "model"],
+  "main": "./plugin/opencode-subagent-model/index.ts",
+  "exports": {
+    ".": "./plugin/opencode-subagent-model/index.ts",
+    "./server": "./plugin/opencode-subagent-model/index.ts",
+    "./tui": "./plugin/opencode-subagent-model/tui.ts",
+    "./rpc": "./plugin/opencode-subagent-model/rpc.ts"
+  },
+  "files": ["plugin/**/*.ts", "!plugin/**/*.test.ts", "CHANGELOG.md"],
+  "publishConfig": {
+    "access": "public",
+    "tag": "next"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.24"
+  }
+}

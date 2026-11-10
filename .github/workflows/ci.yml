@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: 单测 + 版本一致性 + 打包预检
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          # Node >= 23.6 默认启用 TS 类型擦除，测试直接用 .ts（与本地一致）
+          node-version: 24
+      - name: 版本一致性（package.json == CHANGELOG 顶部）
+        run: node scripts/changelog.mjs check
+      - name: 单测
+        run: node --test
+      # 白名单漏文件只会在安装后才暴露，所以在 CI 里钉住打包结果
+      - name: 打包预检
+        run: npm pack --dry-run

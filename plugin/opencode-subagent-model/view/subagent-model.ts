@@ -22,25 +22,27 @@ export async function configureSubagentModel(ctx: Context): Promise<void> {
   const current = policy.model ?? null
   const status = describeCurrent(current, models, providers)
 
-  const choice = await ctx.ui.dialog.select<string | null>({
-    title: `子代理统一模型 · 全局 — 当前：${status}`,
-    placeholder: "搜索模型…",
-    current: current === null ? null : baseRef(current),
-    options: [
-      { title: DISABLE_TITLE, value: null },
-      ...models
-        .map((model) => {
-          const ref = modelRef(model)
-          return {
-            // 完整引用写进 title：宿主的默认过滤只搜 title/category，写成 footer 就搜不到完整 ID。
-            title: `${model.name} — ${ref}`,
-            value: ref,
-            category: providerName(providers, model.providerID),
-          }
-        })
-        .toSorted((a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title)),
-    ],
-  })
+  const choice = await openSelect(ctx, () =>
+    ctx.ui.dialog.select<string | null>({
+      title: `子代理统一模型 · 全局 · 当前：${status}`,
+      placeholder: "搜索模型…",
+      current: current === null ? null : baseRef(current),
+      options: [
+        { title: DISABLE_TITLE, value: null },
+        ...models
+          .map((model) => {
+            const ref = modelRef(model)
+            return {
+              // 完整引用写进 title：插件侧 select 只暴露 title/category 参与默认过滤，写成 footer 就搜不到完整 ID。
+              title: `${model.name} — ${ref}`,
+              value: ref,
+              category: providerName(providers, model.providerID),
+            }
+          })
+          .toSorted((a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title)),
+      ],
+    }),
+  )
   if (choice === undefined) return
   if (choice === null) {
     await save(ctx, location, null)
@@ -56,15 +58,17 @@ export async function configureSubagentModel(ctx: Context): Promise<void> {
   const variants = model.variants ?? []
   let variant: string | undefined
   if (variants.length > 0) {
-    const picked = await ctx.ui.dialog.select<string>({
-      title: `${model.name} · 选择变体`,
-      placeholder: "搜索变体…",
-      current: currentVariant(current, choice) ?? DEFAULT_VARIANT,
-      options: [
-        { title: "默认（不附加变体）", value: DEFAULT_VARIANT },
-        ...variants.map((item) => ({ title: item.id, value: item.id })),
-      ],
-    })
+    const picked = await openSelect(ctx, () =>
+      ctx.ui.dialog.select<string>({
+        title: `${model.name} · 选择变体`,
+        placeholder: "搜索变体…",
+        current: currentVariant(current, choice) ?? DEFAULT_VARIANT,
+        options: [
+          { title: "默认（不附加变体）", value: DEFAULT_VARIANT },
+          ...variants.map((item) => ({ title: item.id, value: item.id })),
+        ],
+      }),
+    )
     if (picked === undefined) return
     variant = picked === DEFAULT_VARIANT ? undefined : picked
   }
@@ -74,6 +78,16 @@ export async function configureSubagentModel(ctx: Context): Promise<void> {
 
 function currentLocation(ctx: Context): NonNullable<Context["location"]> {
   return ctx.location ?? ctx.data.location.default()
+}
+
+/**
+ * 原生 select 没有尺寸参数，默认 60 列会把标题和「名称 — 完整引用」挤成多行；
+ * select 会在返回 Promise 前同步挂载弹窗，随后调整当前弹窗即可加宽。
+ */
+async function openSelect<Value>(ctx: Context, open: () => Promise<Value>): Promise<Value> {
+  const pending = open()
+  ctx.ui.dialog.set({ size: "large" })
+  return pending
 }
 
 async function readPolicy(ctx: Context, location: Location): Promise<SubagentModelSummary | undefined> {
@@ -151,7 +165,7 @@ function describeCurrent(current: string | null, models: readonly ModelInfo[], p
   if (model === undefined) return `${current}（当前目录不可用）`
   const variant = variantOf(current)
   const base = `${providerName(providers, model.providerID)} / ${model.name}`
-  return `${variant === undefined ? base : `${base} · ${variant}`} — ${current}`
+  return variant === undefined ? base : `${base} · ${variant}`
 }
 
 async function save(ctx: Context, location: Location, model: string | null): Promise<void> {

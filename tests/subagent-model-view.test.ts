@@ -91,6 +91,7 @@ async function harness(input: HarnessInput) {
     modelSyncLocations: [] as unknown[],
     toast: [] as Array<{ variant?: string; message: string }>,
     selects: [] as any[],
+    dialogOptions: [] as any[],
   }
   const storage =
     input.storage ??
@@ -157,6 +158,7 @@ async function harness(input: HarnessInput) {
         show: (options: { variant?: string; message: string }) => calls.toast.push(options),
       },
       dialog: {
+        set: (options: any) => calls.dialogOptions.push(options),
         select: async (options: any) => {
           calls.selects.push(options)
           const step = queue.shift()
@@ -175,7 +177,7 @@ async function harness(input: HarnessInput) {
 
 const DISABLE = "关闭强制覆盖（恢复 OpenCode 原有选择规则）"
 
-test("模型列表覆盖所有供应商的聊天模型、按供应商分组，并显示当前完整引用", async () => {
+test("模型列表覆盖所有供应商的聊天模型、按供应商分组，标题只显示当前模型的可读名称", async () => {
   const h = await harness({
     policy: "provider-a/alpha#high",
     models: [ALPHA, BETA, VISION],
@@ -187,10 +189,17 @@ test("模型列表覆盖所有供应商的聊天模型、按供应商分组，�
 
   const dialog = h.calls.selects[0]
   assert.match(dialog.title, /子代理统一模型/)
-  assert.match(dialog.title, /Provider A/)
-  assert.match(dialog.title, /Alpha/)
-  assert.match(dialog.title, /provider-a\/alpha#high/)
+  assert.match(dialog.title, /Provider A \/ Alpha · high/)
+  assert.equal(
+    dialog.title.includes("provider-a/alpha"),
+    false,
+    "标题不应重复存储用的完整引用",
+  )
   assert.equal(dialog.current, "provider-a/alpha", "当前模型所在行应被标记")
+  assert.ok(
+    h.calls.dialogOptions.some((options) => options.size === "large"),
+    "弹窗应加宽，避免标题与完整引用换行",
+  )
 
   const titles = dialog.options.map((option: any) => option.title)
   assert.ok(titles[0].includes(DISABLE), "首个选项是关闭强制覆盖")

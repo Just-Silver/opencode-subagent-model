@@ -85,14 +85,16 @@
 选择有变体的模型后，再选择默认参数或一个变体；取消任一步不保存。
 保存经 RPC 写到服务端，成功或失败以 toast 告知；RPC 显式携带当前 location。
 已选模型即使不再可用，也应展示原引用并允许关闭或重新选择。
+标题里的当前模型只写可读名称，不回显存储用的 `provider/model#variant`，避免同一模型出现两次；
+只有模型已不在目录中时才显示原引用和「当前目录不可用」。
 
 ```text
-子代理统一模型（全局）
-当前：provider/model#variant（或：未启用）
+子代理统一模型 · 全局 · 当前：供应商 / 模型名称 · 变体
+搜索模型…
 
-关闭强制覆盖 — 恢复 OpenCode 原有选择规则
-模型名称      — provider/model
-模型名称      — provider/model
+关闭强制覆盖（恢复 OpenCode 原有选择规则）
+模型名称 — provider/model
+模型名称 — provider/model
 ```
 
 ## 验证与已核实的宿主契约
@@ -113,3 +115,8 @@
 - 本机 OpenCode 源码 `packages/core/src/plugin/host.ts` 的 `storage()`：命名空间仅包含插件 ID，不含 location。
 - `packages/core/src/tool/plugin/subagent.ts`：显式 `model` 优先于 agent 配置和父会话模型，
   续接也会按显式模型切换；内置解析验证可用聊天模型与变体。
+- `packages/tui/src/ui/dialog.tsx` 与 `packages/tui/src/plugin/api.tsx`：`dialog.select` 没有尺寸参数，
+  每次都按 `medium`（60 列）重开；`select` 返回 Promise 前已同步挂载弹窗，随后
+  `dialog.set({ size: "large" })` 可把当前弹窗加宽到 88 列，避免标题与行内完整引用换行。
+- `packages/tui/src/ui/dialog-select.tsx`：默认过滤只取 `title`/`category`/`searchText`，
+  插件侧 `select` 不暴露 `searchText`，所以完整引用必须留在 `title` 里才可搜索。

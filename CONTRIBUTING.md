@@ -37,7 +37,7 @@ TUI 注入包必须标为 external。测试仅模拟宿主存储、钩子、模�
 
 ## npm 分发
 
-版本单一来源为 `package.json`，当前 `0.1.0-beta.0` 尚未发布；发布前同步 CHANGELOG 并完成上述验证。
+版本单一来源为 `package.json`；发布前同步 CHANGELOG 并完成上述验证。
 `publishConfig.tag = next`，npm 包白名单仅包含插件源码与 CHANGELOG；README、LICENSE 由 npm 自动收录。
 
 流水线：`ci.yml` 在 push `main` / PR 上跑版本一致性 + 单测 + 打包预检；

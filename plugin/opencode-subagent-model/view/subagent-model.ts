@@ -24,7 +24,7 @@ export async function configureSubagentModel(ctx: Context): Promise<void> {
 
   const choice = await openSelect(ctx, () =>
     ctx.ui.dialog.select<string | null>({
-      title: `子代理统一模型 · 全局 · 当前：${status}`,
+      title: `当前子代理模型 · 全局\n${status}`,
       placeholder: "搜索模型…",
       current: current === null ? null : baseRef(current),
       options: [

@@ -188,8 +188,8 @@ test("模型列表覆盖所有供应商的聊天模型、按供应商分组，�
   await configureSubagentModel(h.ctx)
 
   const dialog = h.calls.selects[0]
-  assert.match(dialog.title, /子代理统一模型/)
-  assert.match(dialog.title, /Provider A \/ Alpha · high/)
+  assert.match(dialog.title, /^当前子代理模型 · 全局\n/, "标题分两行：第一行说明这是全局的当前选择")
+  assert.match(dialog.title, /Provider A \/ Alpha · high/, "第二行显示当前模型与变体")
   assert.equal(
     dialog.title.includes("provider-a/alpha"),
     false,

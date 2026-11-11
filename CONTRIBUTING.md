@@ -22,6 +22,20 @@ tests/                     业务行为用例
 server 不能运行时依赖宿主包；TUI 不写 JSX，以免 npm 安装引入另一套 Solid 运行时。
 详细策略、存储和宿主依据只维护在[策略契约](docs/subagent-model-policy.md)。
 
+## 本地调试
+
+宿主只加载当前配置指向的那一份插件，改了本仓库源码不代表宿主会看到：
+
+- 全局 `plugins` 写 `"@justsilver/opencode-subagent-model"` 时，运行的是 npm 已发布版本，本地改动无效；
+- 调试本仓库改动时，把该项换成插件目录的绝对路径，并移除 npm 同名项（同一插件 ID 不能并存）：
+
+  ```json
+  { "package": "D:\\Code\\Projects\\Agents\\opencode-subagent-model\\plugin\\opencode-subagent-model" }
+  ```
+
+- 改完配置与代码后完全退出并重新启动 OpenCode；TUI 入口只在启动时加载，不存在热更新；
+- 要让用户拿到改动，只能按「npm 分发」升版本发布，不能在本地验证通过后假定已生效。
+
 ## 验证
 
 ```bash

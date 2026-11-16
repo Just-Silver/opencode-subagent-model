@@ -24,7 +24,8 @@
 - 保存值为 `{ model: string | null }`；字符串格式为 `providerID/modelID` 或
   `providerID/modelID#variant`，`null` 表示关闭覆盖，缺键同样表示关闭。
 - 宿主为键附加插件命名空间后写入 OpenCode SQLite 的 `kv` 表。
-  命名空间属于插件 ID `opencode-subagent-model`；这是持久设置，不使用 TTL，也不写 TUI 本地存储或 `opencode.json`。
+  命名空间只由插件 ID `opencode-subagent-model` 决定、不含版本，更新插件继续读写同一键，不会产生重复记录；
+  这是持久设置，不使用 TTL，也不写 TUI 本地存储或 `opencode.json`。
 - 每次 `subagent` 执行前读取同一键，不在 location 实例闭包中缓存设置。
   保存成功后的后续读取跨项目生效；已经完成读取的并发调用不追溯修改。
 - 只通过宿主存储 API 读写，不直接操作 SQLite 文件。
@@ -81,7 +82,9 @@
 ## TUI 交互
 
 全局 slash / 命令面板入口为 `/subagent-model`，只操作本插件的模型策略。
-弹窗显示当前策略，提供关闭选项与可搜索的当前 location 可用聊天模型，来源不限本插件。
+弹窗显示当前策略，列出可搜索的当前 location 可用聊天模型，来源不限本插件。
+当前模型及其供应商分组排在列表最前，当前模型位于首行；未启用或当前项已失效时保持供应商字母序。
+关闭覆盖是固定在弹窗底部的操作（`ctrl+d`）：模型列表会滚动、也会被搜索过滤，关闭项不能放在列表里。
 选择有变体的模型后，再选择默认参数或一个变体；取消任一步不保存。
 保存经 RPC 写到服务端，成功或失败以 toast 告知；RPC 显式携带当前 location。
 已选模型即使不再可用，也应展示原引用并允许关闭或重新选择。
@@ -89,12 +92,14 @@
 只有模型已不在目录中时才显示原引用和「当前目录不可用」。
 
 ```text
-子代理统一模型 · 全局 · 当前：供应商 / 模型名称 · 变体
+当前子代理模型 · 全局
+供应商 / 模型名称 · 变体
 搜索模型…
 
-关闭强制覆盖（恢复 OpenCode 原有选择规则）
+供应商
 模型名称 — provider/model
 模型名称 — provider/model
+关闭强制覆盖  ctrl+d
 ```
 
 ## 验证与已核实的宿主契约
@@ -120,3 +125,9 @@
   `dialog.set({ size: "large" })` 可把当前弹窗加宽到 88 列，避免标题与行内完整引用换行。
 - `packages/tui/src/ui/dialog-select.tsx`：默认过滤只取 `title`/`category`/`searchText`，
   插件侧 `select` 不暴露 `searchText`，所以完整引用必须留在 `title` 里才可搜索。
+- `packages/tui/src/plugin/api.tsx` 与 `packages/tui/src/ui/dialog-select.tsx`：插件 `select` 的
+  `actions`（`selection: "none"`，必须带 `bind` 才会显示）渲染在底部操作区，不随列表滚动、
+  也不受搜索过滤；触发其中一个不会关闭弹窗，插件需自行 `dialog.clear()`。
+  模态弹窗的键位层会拦截按键，`ctrl+d` 在弹窗内不会触发宿主全局的退出应用命令（已实测）。
+- `packages/tui/src/ui/dialog-select.tsx`：`current` 的定位滚动通过 `renderer.once(FRAME, …)` 延迟到下一帧，
+  弹窗第一帧仍停在列表顶部；把当前项排到首行才能让第一帧就显示它（用真实宿主渲染验证过）。

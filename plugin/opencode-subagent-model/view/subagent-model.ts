@@ -6,7 +6,7 @@ import { subagentModelRpc, type SubagentModelSummary } from "../rpc.ts"
 type Context = Plugin.Context
 type Location = ReturnType<typeof currentLocation>
 
-const DISABLE_TITLE = "关闭强制覆盖（恢复 OpenCode 原有选择规则）"
+const DISABLE_TITLE = "关闭强制覆盖"
 const DEFAULT_VARIANT = "\u0000default"
 
 export async function configureSubagentModel(ctx: Context): Promise<void> {
@@ -21,33 +21,44 @@ export async function configureSubagentModel(ctx: Context): Promise<void> {
   const providers = providerNames(ctx, location)
   const current = policy.model ?? null
   const status = describeCurrent(current, models, providers)
+  const options = models
+    .map((model) => {
+      const ref = modelRef(model)
+      return {
+        // 完整引用写进 title：插件侧 select 只暴露 title/category 参与默认过滤，写成 footer 就搜不到完整 ID。
+        title: `${model.name} — ${ref}`,
+        value: ref,
+        category: providerName(providers, model.providerID),
+      }
+    })
+    .toSorted((a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title))
 
+  // 关闭项放在底部操作区：列表会滚动、也会被搜索过滤，放进列表就可能找不到。
+  let disableRequested = false
   const choice = await openSelect(ctx, () =>
-    ctx.ui.dialog.select<string | null>({
+    ctx.ui.dialog.select<string>({
       title: `当前子代理模型 · 全局\n${status}`,
       placeholder: "搜索模型…",
       current: current === null ? null : baseRef(current),
-      options: [
-        { title: DISABLE_TITLE, value: null },
-        ...models
-          .map((model) => {
-            const ref = modelRef(model)
-            return {
-              // 完整引用写进 title：插件侧 select 只暴露 title/category 参与默认过滤，写成 footer 就搜不到完整 ID。
-              title: `${model.name} — ${ref}`,
-              value: ref,
-              category: providerName(providers, model.providerID),
-            }
-          })
-          .toSorted((a, b) => a.category.localeCompare(b.category) || a.title.localeCompare(b.title)),
+      actions: [
+        {
+          bind: "ctrl+d",
+          title: DISABLE_TITLE,
+          selection: "none",
+          onTrigger: () => {
+            disableRequested = true
+            ctx.ui.dialog.clear()
+          },
+        },
       ],
+      options: current === null ? options : withCurrentFirst(options, baseRef(current)),
     }),
   )
-  if (choice === undefined) return
-  if (choice === null) {
+  if (disableRequested) {
     await save(ctx, location, null)
     return
   }
+  if (choice === undefined) return
 
   const model = models.find((candidate) => modelRef(candidate) === choice)
   if (model === undefined) {
@@ -147,6 +158,20 @@ function modelRef(model: ModelInfo): string {
 function baseRef(ref: string): string {
   const variantStart = ref.indexOf("#", ref.indexOf("/") + 1)
   return variantStart === -1 ? ref : ref.slice(0, variantStart)
+}
+
+// 宿主把 current 的滚动放到下一帧；当前项和所在分组置顶，第一帧就能看到它。
+function withCurrentFirst<T extends { readonly value: string; readonly category: string }>(
+  options: readonly T[],
+  target: string,
+): T[] {
+  const current = options.find((option) => option.value === target)
+  if (current === undefined) return [...options]
+  return [
+    current,
+    ...options.filter((option) => option !== current && option.category === current.category),
+    ...options.filter((option) => option !== current && option.category !== current.category),
+  ]
 }
 
 function variantOf(ref: string): string | undefined {

@@ -67,7 +67,10 @@ function fakeStorage(initial?: Record<string, unknown>): FakeStorage {
   return state
 }
 
-type Step = { kind: "select"; value?: unknown } | { kind: "title"; title: string }
+type Step =
+  | { kind: "select"; value?: unknown }
+  | { kind: "action"; title: string }
+  | { kind: "title"; title: string }
 
 interface HarnessInput {
   /** 省略 = 没有策略键；null = 已明确关闭。 */
@@ -92,6 +95,7 @@ async function harness(input: HarnessInput) {
     toast: [] as Array<{ variant?: string; message: string }>,
     selects: [] as any[],
     dialogOptions: [] as any[],
+    cleared: 0,
   }
   const storage =
     input.storage ??
@@ -159,11 +163,20 @@ async function harness(input: HarnessInput) {
       },
       dialog: {
         set: (options: any) => calls.dialogOptions.push(options),
+        clear: () => {
+          calls.cleared += 1
+        },
         select: async (options: any) => {
           calls.selects.push(options)
           const step = queue.shift()
           if (step === undefined) throw new Error("测试脚本用完了：界面打开了额外的选择框")
           if (step.kind === "select") return step.value
+          if (step.kind === "action") {
+            const action = options.actions?.find((candidate: any) => candidate.title === step.title)
+            assert.ok(action, `选择框底部应有「${step.title}」操作`)
+            action.onTrigger()
+            return undefined
+          }
           const option = options.options.find((candidate: any) => candidate.title === step.title)
           assert.ok(option, `选择框里应有「${step.title}」`)
           return option.value
@@ -175,7 +188,7 @@ async function harness(input: HarnessInput) {
   return { ctx, calls, storage }
 }
 
-const DISABLE = "关闭强制覆盖（恢复 OpenCode 原有选择规则）"
+const DISABLE = "关闭强制覆盖"
 
 test("模型列表覆盖所有供应商的聊天模型、按供应商分组，标题只显示当前模型的可读名称", async () => {
   const h = await harness({
@@ -196,13 +209,22 @@ test("模型列表覆盖所有供应商的聊天模型、按供应商分组，�
     "标题不应重复存储用的完整引用",
   )
   assert.equal(dialog.current, "provider-a/alpha", "当前模型所在行应被标记")
+  assert.equal(dialog.options[0].value, "provider-a/alpha", "当前模型置于列表首位")
   assert.ok(
     h.calls.dialogOptions.some((options) => options.size === "large"),
     "弹窗应加宽，避免标题与完整引用换行",
   )
 
   const titles = dialog.options.map((option: any) => option.title)
-  assert.ok(titles[0].includes(DISABLE), "首个选项是关闭强制覆盖")
+  assert.equal(
+    titles.some((title: string) => title.includes(DISABLE)),
+    false,
+    "关闭项不放进会滚动、会被搜索过滤的模型列表",
+  )
+  const disableAction = dialog.actions.find((action: any) => action.title === DISABLE)
+  assert.ok(disableAction, "关闭项应固定在底部操作区")
+  assert.equal(disableAction.selection, "none", "关闭操作不依赖当前选中项")
+  assert.equal(typeof disableAction.bind, "string", "关闭操作应有快捷键提示")
   assert.ok(
     titles.some((title: string) => title.includes("provider-a/alpha")),
     "当前模型行应显示完整引用",
@@ -219,6 +241,35 @@ test("模型列表覆盖所有供应商的聊天模型、按供应商分组，�
 
   const categories = new Set(dialog.options.map((option: any) => option.category).filter(Boolean))
   assert.deepEqual(categories, new Set(["Provider A", "Provider B"]))
+})
+
+test("当前模型所在分组置顶，未启用时保持供应商字母序", async () => {
+  const pinned = await harness({
+    policy: "provider-b/beta",
+    models: [ALPHA, BETA],
+    providers: PROVIDERS,
+    script: [{ kind: "select" }],
+  })
+  await configureSubagentModel(pinned.ctx)
+
+  const dialog = pinned.calls.selects[0]
+  assert.equal(dialog.options[0].value, "provider-b/beta", "即使字母序靠后，当前模型也排在首位")
+  assert.deepEqual([...new Set(dialog.options.map((option: any) => option.category))], ["Provider B", "Provider A"])
+
+  const plain = await harness({
+    policy: null,
+    models: [ALPHA, BETA],
+    providers: PROVIDERS,
+    script: [{ kind: "select" }],
+  })
+  await configureSubagentModel(plain.ctx)
+
+  assert.equal(plain.calls.selects[0].current, null)
+  assert.deepEqual(
+    [...new Set(plain.calls.selects[0].options.map((option: any) => option.category))],
+    ["Provider A", "Provider B"],
+    "未启用时不重排",
+  )
 })
 
 test("选择模型和变体后经真实策略保存完整引用", async () => {
@@ -285,15 +336,16 @@ test("取消首层或变体选择都不写全局设置", async () => {
   assert.equal(second.calls.toast.some((toast) => toast.variant === "success"), false)
 })
 
-test("选择关闭强制覆盖后保存 null", async () => {
+test("点击底部关闭操作后保存 null", async () => {
   const h = await harness({
     policy: "provider-a/alpha#high",
     models: [ALPHA],
     providers: PROVIDERS,
-    script: [{ kind: "title", title: DISABLE }],
+    script: [{ kind: "action", title: DISABLE }],
   })
   await configureSubagentModel(h.ctx)
 
+  assert.equal(h.calls.cleared, 1, "触发关闭后应收起弹窗")
   assert.deepEqual(h.storage.map.get(POLICY_KEY), { model: null })
   assert.ok(h.calls.toast.some((toast) => toast.variant === "success"))
 })
@@ -301,15 +353,20 @@ test("选择关闭强制覆盖后保存 null", async () => {
 test("当前模型失效时仍显示原引用，并允许关闭覆盖", async () => {
   const h = await harness({
     policy: "provider-a/removed#high",
-    models: [ALPHA],
+    models: [ALPHA, BETA],
     providers: PROVIDERS,
-    script: [{ kind: "title", title: DISABLE }],
+    script: [{ kind: "action", title: DISABLE }],
   })
   await configureSubagentModel(h.ctx)
 
   const dialog = h.calls.selects[0]
   assert.match(dialog.title, /provider-a\/removed#high/)
-  assert.ok(dialog.options[0].title.includes(DISABLE))
+  assert.deepEqual(
+    [...new Set(dialog.options.map((option: any) => option.category))],
+    ["Provider A", "Provider B"],
+    "当前项已失效时保持供应商字母序",
+  )
+  assert.ok(dialog.actions.some((action: any) => action.title === DISABLE))
   assert.deepEqual(h.storage.map.get(POLICY_KEY), { model: null })
 })
 
@@ -318,13 +375,14 @@ test("目录没有可用聊天模型时仍显示原引用并允许关闭覆盖",
     policy: "provider-a/removed#high",
     models: [VISION],
     providers: PROVIDERS,
-    script: [{ kind: "title", title: DISABLE }],
+    script: [{ kind: "action", title: DISABLE }],
   })
   await configureSubagentModel(h.ctx)
 
   const dialog = h.calls.selects[0]
   assert.match(dialog.title, /provider-a\/removed#high/)
-  assert.equal(dialog.options.length, 1, "只剩关闭选项")
+  assert.equal(dialog.options.length, 0, "没有可选的聊天模型")
+  assert.ok(dialog.actions.some((action: any) => action.title === DISABLE))
   assert.deepEqual(h.storage.map.get(POLICY_KEY), { model: null })
 })
 

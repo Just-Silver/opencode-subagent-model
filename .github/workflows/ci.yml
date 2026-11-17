@@ -22,10 +22,19 @@ jobs:
         with:
           # Node >= 23.6 默认启用 TS 类型擦除，测试直接用 .ts（与本地一致）
           node-version: 24
+      - name: 安装开发依赖
+        run: npm install --no-audit --no-fund --no-package-lock
       - name: 版本一致性（package.json == CHANGELOG 顶部）
         run: node scripts/changelog.mjs check
+      - name: 类型检查
+        run: npm run typecheck
       - name: 单测
         run: node --test
+      # TUI 的 JSX 不会被 node --test 加载，构建能提前发现入口/导入错误
+      - name: 入口构建预检
+        run: |
+          npx --yes esbuild plugin/opencode-team/index.ts --bundle --platform=node --format=esm --outfile=/tmp/team-server.js
+          npx --yes esbuild plugin/opencode-team/tui.ts --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:@opentui/core --external:@opentui/solid --external:solid-js --outfile=/tmp/team-tui.js
       # 白名单漏文件只会在安装后才暴露，所以在 CI 里钉住打包结果
       - name: 打包预检
         run: npm pack --dry-run

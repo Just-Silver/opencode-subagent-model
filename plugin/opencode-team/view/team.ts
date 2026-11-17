@@ -1,6 +1,7 @@
 import type { AgentInfo, ModelInfo, ProviderInfo } from "@opencode/client"
 import type { Plugin } from "@opencode/plugin/tui"
 
+import { isChatModel } from "../model-ref.ts"
 import { teamRpc, type TeamPolicySummary } from "../rpc.ts"
 import type {
   DashboardAgent,
@@ -19,17 +20,21 @@ export interface TeamDashboardData {
   readonly modelError?: string
   readonly warning?: string
   readonly agentsSupported: boolean
+  readonly agentsError?: string
 }
 
 export type LoadTeamDashboardResult =
   | { readonly kind: "ready"; readonly data: TeamDashboardData }
   | { readonly kind: "blocked"; readonly message: string }
 
+type StateRead =
+  | { readonly summary: TeamPolicySummary }
+  | { readonly problem: string }
+
 export interface ModelSelectionResult {
   readonly saved: boolean
   readonly tone: FeedbackTone
   readonly message: string
-  readonly model?: string | null
   readonly models?: Readonly<Record<string, string>>
 }
 
@@ -46,17 +51,10 @@ export async function loadTeamDashboard(
   location: Location,
 ): Promise<LoadTeamDashboardResult> {
   const state = await readState(ctx, location)
-  if (state.problem !== undefined) return { kind: "blocked", message: state.problem }
+  if ("problem" in state) return { kind: "blocked", message: state.problem }
   const summary = state.summary
-  if (summary === undefined) return { kind: "blocked", message: "无法读取团队模型设置。" }
   if (summary.conflict !== undefined) {
     return { kind: "blocked", message: conflictMessage(summary) }
-  }
-  if (!summary.supported) {
-    return {
-      kind: "blocked",
-      message: "当前宿主不支持子代理模型覆盖（所需工具钩子不可用），团队模型功能不可用。",
-    }
   }
 
   const agents = await readAgents(ctx, location)
@@ -86,6 +84,7 @@ export async function loadTeamDashboard(
       ...(models.error === undefined ? {} : { modelError: models.error }),
       ...(agents.warning === undefined ? {} : { warning: agents.warning }),
       agentsSupported: summary.agentsSupported ?? false,
+      ...(summary.agentsError === undefined ? {} : { agentsError: summary.agentsError }),
     },
   }
 }
@@ -130,10 +129,7 @@ export async function restoreAgentModel(
   return saveAgentModel(ctx, location, agent, null)
 }
 
-async function readState(
-  ctx: Context,
-  location: Location,
-): Promise<{ readonly summary?: TeamPolicySummary; readonly problem?: string }> {
+async function readState(ctx: Context, location: Location): Promise<StateRead> {
   let result: TeamPolicySummary
   try {
     result = (await ctx.client.rpc(teamRpc).getTeamPolicy({}, { location })) as TeamPolicySummary
@@ -183,7 +179,7 @@ async function readModels(
     if (collection.list(location) === undefined) await collection.sync(location)
     const models = collection.list(location)
     if (models === undefined) throw new Error("模型目录未返回数据")
-    return { models: models.filter((model) => model.type === undefined || model.type === "chat") }
+    return { models: models.filter(isChatModel) }
   } catch (error) {
     return { models: [], error: `无法读取模型列表：${message(error)}` }
   }
@@ -211,7 +207,8 @@ function conflictMessage(state: TeamPolicySummary): string {
     return `检测到旧版插件 ${state.conflict?.pluginID ?? ""} 仍在加载。旧插件没有启用模型覆盖；请移除旧插件并完全重启 OpenCode。`
   }
   const reason = migration?.errors?.join("; ")
-  return `检测到旧版插件 ${state.conflict?.pluginID ?? ""} 仍在加载，它会覆盖按 Agent 的模型设置。请移除旧插件并完全重启 OpenCode。${reason === undefined ? "" : `（旧设置迁移失败：${reason}）`}`
+  const label = migration?.status === "unavailable" ? "旧设置迁移不可用" : "旧设置迁移失败"
+  return `检测到旧版插件 ${state.conflict?.pluginID ?? ""} 仍在加载，它会覆盖按 Agent 的模型设置。请移除旧插件并完全重启 OpenCode。${reason === undefined ? "" : `（${label}：${reason}）`}`
 }
 
 async function saveModel(
@@ -230,7 +227,6 @@ async function saveModel(
       saved: false,
       tone: "error",
       message: `保存 Agent 模型失败：${message(error)}`,
-      model,
     }
   }
   if (!result.ok) {
@@ -238,7 +234,6 @@ async function saveModel(
       saved: false,
       tone: "error",
       message: `保存 Agent 模型失败：${summarize(result)}`,
-      model,
     }
   }
   return {
@@ -250,7 +245,6 @@ async function saveModel(
           ? `已恢复 ${agentName} 的 OpenCode 原生模型选择`
           : `已清除 ${agentName} 的团队覆盖，回到 Agent 配置的 ${hostModel}`
         : `${agentName} 的子代理模型已设为 ${result.models?.[agentID] ?? model}`,
-    model,
     ...(result.models === undefined ? {} : { models: result.models }),
   }
 }

@@ -1,5 +1,7 @@
 import { ORCHESTRATOR_PROMPT, QA_PROMPT, REVIEWER_PROMPT } from "./prompts.ts"
 
+export { TEAM_SUBAGENT_IDS } from "./team-ids.ts"
+
 export interface PermissionRule {
   readonly action: string
   readonly resource: string
@@ -14,9 +16,6 @@ export interface TeamAgentDefinition {
   readonly system: string
   readonly permissions: readonly PermissionRule[]
 }
-
-/** Built-in agents the team reuses; also the fallback set for a legacy model import. */
-export const TEAM_SUBAGENT_IDS = ["general", "explore", "qa", "reviewer"] as const
 
 // Subagents must not ask the user directly; the primary Orchestrator owns user interaction.
 const QUESTION_DENY: readonly PermissionRule[] = [{ action: "question", resource: "*", effect: "deny" }]

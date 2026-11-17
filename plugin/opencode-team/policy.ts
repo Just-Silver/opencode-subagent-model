@@ -1,3 +1,4 @@
+import { formatModelRef, isChatModel, parseModelRef, type ModelRef } from "./model-ref.ts"
 import type { TeamConflict, TeamMigration, TeamPolicySummary } from "./rpc.ts"
 
 const POLICY_KEY = "team-policy"
@@ -89,6 +90,7 @@ export interface TeamPolicyContext {
 export interface TeamPolicyOptions {
   readonly conflict?: TeamConflict
   readonly agentsSupported?: boolean
+  readonly agentsError?: string
   /** Used when the host cannot list agents; the built-ins are enough for a faithful legacy import. */
   readonly fallbackAgents?: readonly string[]
   /**
@@ -103,12 +105,6 @@ export interface TeamPolicyHandlers {
   setAgentModel(input?: unknown): Promise<TeamPolicySummary>
 }
 
-interface ModelRef {
-  readonly providerID: string
-  readonly id: string
-  readonly variant?: string
-}
-
 interface MigrationMarker {
   readonly from: string
   readonly status: "applied" | "empty"
@@ -116,22 +112,9 @@ interface MigrationMarker {
   readonly agents: readonly string[]
 }
 
-// 模型 ID 本身可能包含 /，因此只在第一个 / 分隔供应商。
-function parseModelRef(input: string): ModelRef | undefined {
-  const providerEnd = input.indexOf("/")
-  if (providerEnd <= 0) return undefined
-  const variantStart = input.indexOf("#", providerEnd + 1)
-  const providerID = input.slice(0, providerEnd)
-  const id = input.slice(providerEnd + 1, variantStart === -1 ? undefined : variantStart)
-  const variant = variantStart === -1 ? undefined : input.slice(variantStart + 1)
-  if (!id || providerID.includes("#") || (variant !== undefined && (!variant || variant.includes("#")))) {
-    return undefined
-  }
-  return { providerID, id, ...(variant === undefined ? {} : { variant }) }
-}
-
-function formatModelRef(ref: ModelRef): string {
-  return `${ref.providerID}/${ref.id}${ref.variant === undefined ? "" : `#${ref.variant}`}`
+/** Reuses a conflict result the caller already probed instead of asking the plugin list again. */
+interface MigrationProbe {
+  readonly conflict?: TeamConflict
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -143,7 +126,9 @@ function message(error: unknown): string {
 }
 
 function corruptPolicy(): Error {
-  return new Error("Agent model policy is corrupt: expected { version: 1, agents: Record<string, string> }.")
+  return new Error(
+    `Agent model policy is corrupt: expected { version: ${POLICY_VERSION}, agents: Record<string, string> }.`,
+  )
 }
 
 async function readPolicy(storage: TeamPolicyContext["storage"]): Promise<Record<string, string>> {
@@ -203,26 +188,28 @@ async function applyPolicy(
   event: TeamToolEvent,
   forced: WeakMap<object, string>,
   currentConflict: () => Promise<TeamConflict | undefined>,
-  ensureMigration: () => Promise<TeamMigration>,
+  ensureMigration: (probe?: MigrationProbe) => Promise<TeamMigration>,
 ): Promise<void> {
   if (event.tool !== TOOL_NAME) return
   if (!isRecord(event.input)) return
   const agentID = event.input.agent
   if (typeof agentID !== "string" || agentID.trim() === "") return
+  const agents = await readPolicy(ctx.storage)
+  const model = agents[agentID]
+  // Most calls target an agent without an override. Read the policy first so those calls never
+  // pay for the legacy-plugin probe.
+  if (model === undefined) return
   const conflict = await currentConflict()
   // While the legacy plugin is active its global hook owns this call. Importing its setting is
   // safe, but writing a competing model would make the effective model depend on plugin order.
   if (conflict !== undefined) {
     try {
-      await ensureMigration()
+      await ensureMigration({ conflict })
     } catch {
       // The old plugin still enforces this call; a migration failure is reported by the next read.
     }
     return
   }
-  const agents = await readPolicy(ctx.storage)
-  const model = agents[agentID]
-  if (model === undefined) return
   const input = { ...event.input, model }
   event.input = input
   forced.set(input, model)
@@ -258,7 +245,7 @@ async function validateModel(ctx: TeamPolicyContext, ref: ModelRef): Promise<str
   const reference = formatModelRef(ref)
   const model = data.find((candidate) => candidate.providerID === ref.providerID && candidate.id === ref.id)
   if (model === undefined) return `Model "${reference}" is not an available chat model.`
-  if (model.type !== undefined && model.type !== "chat") return `Model "${reference}" is not a chat model.`
+  if (!isChatModel(model)) return `Model "${reference}" is not a chat model.`
   if (ref.variant === undefined) return undefined
   const variants = model.variants ?? []
   if (variants.some((variant) => variant.id === ref.variant)) return undefined
@@ -290,10 +277,14 @@ function supportsHook(ctx: TeamPolicyContext): boolean {
   return typeof ctx.tool?.hook === "function"
 }
 
-function unavailable(reason: string, agentsSupported: boolean): TeamPolicyHandlers {
+function unavailable(reason: string, agentsSupported: boolean, agentsError?: string): TeamPolicyHandlers {
+  const agentState = {
+    agentsSupported,
+    ...(agentsError === undefined ? {} : { agentsError }),
+  }
   return {
-    getTeamPolicy: async () => ({ ok: false, supported: false, agentsSupported, errors: [reason] }),
-    setAgentModel: async () => ({ ok: false, supported: false, agentsSupported, errors: [reason] }),
+    getTeamPolicy: async () => ({ ok: false, supported: false, ...agentState, errors: [reason] }),
+    setAgentModel: async () => ({ ok: false, supported: false, ...agentState, errors: [reason] }),
   }
 }
 
@@ -405,8 +396,9 @@ function migration(
 ) {
   let settled: TeamMigration | undefined
   let pending: Promise<TeamMigration> | undefined
-  const attempt = async (): Promise<TeamMigration> => {
-    if ((await currentConflict()) === undefined) {
+  const attempt = async (probe?: MigrationProbe): Promise<TeamMigration> => {
+    const conflict = probe === undefined ? await currentConflict() : probe.conflict
+    if (conflict === undefined) {
       try {
         const marker = await readMarker(ctx.storage)
         if (marker !== undefined) return migrationSummary(marker)
@@ -442,26 +434,29 @@ async function getState(
   ctx: TeamPolicyContext,
   options: TeamPolicyOptions,
   currentConflict: () => Promise<TeamConflict | undefined>,
-  ensureMigration: () => Promise<TeamMigration>,
+  ensureMigration: (probe?: MigrationProbe) => Promise<TeamMigration>,
 ): Promise<TeamPolicySummary> {
-  const agentsSupported = options.agentsSupported ?? false
+  const agentState = {
+    agentsSupported: options.agentsSupported ?? false,
+    ...(options.agentsError === undefined ? {} : { agentsError: options.agentsError }),
+  }
   const conflict = await currentConflict()
   if (!supportsHook(ctx)) {
     return {
       ok: false,
       supported: false,
-      agentsSupported,
+      ...agentState,
       errors: ["This host cannot enforce a subagent model."],
       ...(conflict === undefined ? {} : { conflict }),
     }
   }
   try {
+    const migrated = await ensureMigration({ conflict })
     const models = await readPolicy(ctx.storage)
-    const migrated = await ensureMigration()
     return {
       ok: true,
       supported: true,
-      agentsSupported,
+      ...agentState,
       models,
       ...(migrated.status === "unavailable" && conflict === undefined ? {} : { migration: migrated }),
       ...(conflict === undefined ? {} : { conflict }),
@@ -470,7 +465,7 @@ async function getState(
     return {
       ok: false,
       supported: true,
-      agentsSupported,
+      ...agentState,
       errors: [message(error)],
       ...(conflict === undefined ? {} : { conflict }),
     }
@@ -482,7 +477,7 @@ async function setAgentModel(
   input: unknown,
   options: TeamPolicyOptions,
   currentConflict: () => Promise<TeamConflict | undefined>,
-  ensureMigration: () => Promise<TeamMigration>,
+  ensureMigration: (probe?: MigrationProbe) => Promise<TeamMigration>,
 ): Promise<TeamPolicySummary> {
   const agentsSupported = options.agentsSupported ?? false
   if (!supportsHook(ctx)) {
@@ -545,7 +540,7 @@ async function setAgentModel(
 
   let migrated: TeamMigration | undefined
   try {
-    migrated = await ensureMigration()
+    migrated = await ensureMigration({ conflict })
   } catch {
     // The save already succeeded; migration remains visible on the next read.
   }
@@ -564,7 +559,11 @@ export async function registerTeamPolicy(
 ): Promise<TeamPolicyHandlers> {
   const hook = ctx.tool?.hook
   if (typeof hook !== "function") {
-    return unavailable("This host does not expose the tool execute.before hook.", options.agentsSupported ?? false)
+    return unavailable(
+      "This host does not expose the tool execute.before hook.",
+      options.agentsSupported ?? false,
+      options.agentsError,
+    )
   }
 
   let cachedConflict = options.conflict
@@ -579,7 +578,8 @@ export async function registerTeamPolicy(
     return cachedConflict
   }
   const ensureMigration = migration(ctx, currentConflict, options.fallbackAgents ?? [])
-  if ((await currentConflict()) !== undefined) await ensureMigration()
+  const initialConflict = await currentConflict()
+  if (initialConflict !== undefined) await ensureMigration({ conflict: initialConflict })
 
   const forced = new WeakMap<object, string>()
   let ready = false
@@ -597,11 +597,13 @@ export async function registerTeamPolicy(
       return unavailable(
         `Agent model policy hook registration failed: ${message(error)}; cleanup failed: ${message(cleanupError)}`,
         options.agentsSupported ?? false,
+        options.agentsError,
       )
     }
     return unavailable(
       `Agent model policy hook registration failed: ${message(error)}`,
       options.agentsSupported ?? false,
+      options.agentsError,
     )
   }
   return {

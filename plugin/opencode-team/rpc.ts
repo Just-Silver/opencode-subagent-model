@@ -33,6 +33,7 @@ const stateOutput = {
     ok: { type: "boolean" },
     supported: { type: "boolean" },
     agentsSupported: { type: "boolean" },
+    agentsError: { type: "string" },
     models: agentModels,
     errors: { type: "array", items: { type: "string" } },
     conflict,
@@ -81,6 +82,7 @@ export interface TeamPolicySummary {
   readonly ok: boolean
   readonly supported: boolean
   readonly agentsSupported?: boolean
+  readonly agentsError?: string
   readonly models?: Readonly<Record<string, string>>
   readonly errors?: readonly string[]
   readonly conflict?: TeamConflict

@@ -7,7 +7,7 @@
 ## 环境与结构
 
 Node ≥ 24，TypeScript 源文件直接由宿主加载，测试使用 Node 原生类型擦除，无运行时依赖。
-`npm install` 仅在需要宿主类型声明时使用，不是运行测试或本地目录加载的前置条件。
+`npm install` 用于安装 `typecheck` 需要的宿主类型声明，不是运行测试或本地目录加载的前置条件。
 
 ```text
 plugin/opencode-team/
@@ -15,6 +15,8 @@ plugin/opencode-team/
   tui.ts                   TUI：全局 /team 命令
   rpc.ts                   getTeamPolicy / setAgentModel 的 JSON Schema 契约
   policy.ts                存储、校验、旧版迁移、执行前覆盖和执行后告知
+  model-ref.ts             模型引用解析、格式化与 chat 模型判定
+  team-ids.ts              团队子代理固定顺序
   team-agents.ts           Orchestrator / QA / Reviewer 定义（仅 QA/Reviewer 拒绝 question）
   prompts.ts               三份 System Prompt 与职责边界
   legacy.ts                旧插件检测与冲突信息
@@ -49,6 +51,8 @@ server 不能运行时依赖宿主包。TUI 的 JSX 只放在 `view/*.tsx`，Ope
 ## 验证
 
 ```bash
+npm install --no-package-lock
+npm run typecheck
 node --test
 npx --yes esbuild plugin/opencode-team/index.ts --bundle --platform=node --format=esm --outfile=dist/team-server.js
 npx --yes esbuild plugin/opencode-team/tui.ts --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:@opentui/core --external:@opentui/solid --external:solid-js --outfile=dist/team-tui.js
@@ -58,14 +62,15 @@ git diff --check
 
 TUI 注入包必须标为 external。测试仅模拟宿主存储、钩子、Agent 转换、模型目录、插件列表和 UI 等外部边界；
 不把假件测试称为真机交互验证，不为覆盖率新增类型/常量断言。TUI 的键盘与尺寸冒烟可按
-[TUI Dashboard](docs/team-tui.md#验证) 用宿主同版本的 `@opentui/solid` 临时渲染测试完成，临时文件不提交。
+[TUI Dashboard](docs/team-tui.md#验证) 由人工在本地用宿主同版本的 `@opentui/solid` 临时渲染测试完成；
+agent 不生成或提交临时渲染测试、探针和截图，临时文件不提交。
 
 ## npm 分发
 
 版本单一来源为 `package.json`；发布前同步 CHANGELOG 并完成上述验证。
 `publishConfig.tag = next`，npm 包白名单仅包含插件源码与 CHANGELOG；README、LICENSE 由 npm 自动收录。
 
-流水线：`ci.yml` 在 push `main` / PR 上跑版本一致性 + 单测 + 打包预检；
+流水线：`ci.yml` 在 push `main` / PR 上跑版本一致性 + 类型检查 + 单测 + 双入口构建 + 打包预检；
 `release.yml` 用 npm Trusted Publishing（OIDC，无长期 token）发版：
 
 | 触发 | 行为 |
@@ -98,7 +103,7 @@ GitHub 仓库改名尚未执行，`package.json` 的 homepage/repository/bugs �
 
 ### 旧包弃用（尚未执行）
 
-旧包 `@justsilver/opencode-subagent-model` 只制定方案，不在本次改动中发布或弃用：
+旧包 `@justsilver/opencode-subagent-model` 只制定方案，当前版本不发布或弃用：
 
 1. 等 `@justsilver/opencode-team` 正式版可安装并确认迁移说明；
 2. 执行 `npm deprecate @justsilver/opencode-subagent-model "Renamed to @justsilver/opencode-team; see migration guide"`；

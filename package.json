@@ -21,7 +21,7 @@
     "./tui": "./plugin/opencode-team/tui.ts",
     "./rpc": "./plugin/opencode-team/rpc.ts"
   },
-  "files": ["plugin/**/*.ts", "plugin/**/*.tsx", "!plugin/**/*.test.ts", "CHANGELOG.md"],
+  "files": ["plugin/**/*.ts", "plugin/**/*.tsx", "CHANGELOG.md"],
   "publishConfig": {
     "access": "public",
     "tag": "next"
@@ -30,7 +30,8 @@
     "node": ">=24"
   },
   "scripts": {
-    "test": "node --test"
+    "test": "node --test",
+    "typecheck": "tsc --noEmit"
   },
   "peerDependencies": {
     "@opentui/core": ">=0.8.4",
@@ -38,6 +39,12 @@
     "solid-js": ">=1.9.12"
   },
   "devDependencies": {
-    "@opencode/plugin": "^2.3.0"
+    "@opencode/client": "^2.3.0",
+    "@opencode/plugin": "^2.3.0",
+    "@opencode/theme": "^2.3.0",
+    "@opentui/core": "^0.8.4",
+    "@opentui/solid": "^0.8.4",
+    "solid-js": "^1.9.17",
+    "typescript": "^5.9.3"
   }
 }

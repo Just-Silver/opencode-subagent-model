@@ -533,7 +533,6 @@ export function ModelConfigView(props: ModelConfigProps) {
             selectedRef={selectedRef()}
             currentBase={current()?.baseRef}
             compact={layout().compact}
-            focused={focus() === "models"}
             onSelect={(ref) => {
               if (pendingRestore()) return
               setSelectedRef(ref)
@@ -685,7 +684,6 @@ function ModelList(props: {
   readonly selectedRef: string
   readonly currentBase?: string
   readonly compact: boolean
-  readonly focused: boolean
   readonly onSelect: (ref: string) => void
   readonly onRef: (ref: string, node: Renderable) => void
   readonly onScrollRef: (value: ScrollBoxRenderable) => void
@@ -745,7 +743,7 @@ function ModelList(props: {
                         flexDirection="column"
                         paddingLeft={2}
                         paddingRight={1}
-                        backgroundColor={rowBackground(props.theme, active(), props.focused)}
+                        backgroundColor={rowBackground(props.theme, active())}
                         onMouseUp={() => props.onSelect(ref)}
                         ref={(node: Renderable) => props.onRef(ref, node)}
                       >
@@ -760,7 +758,7 @@ function ModelList(props: {
                             flexGrow={1}
                             overflow="hidden"
                             wrapMode="none"
-                            fg={rowForeground(props.theme, active(), props.focused)}
+                            fg={rowForeground(props.theme)}
                             attributes={active() ? TextAttributes.BOLD : undefined}
                           >
                             {model.name || model.id}
@@ -768,11 +766,7 @@ function ModelList(props: {
                           <Show when={current()}>
                             <text
                               flexShrink={0}
-                              fg={
-                                active() && props.focused
-                                  ? props.theme.text.action.primary.focused
-                                  : selectedRowAccent(props.theme)
-                              }
+                              fg={selectedRowAccent(props.theme)}
                             >
                               当前
                             </text>
@@ -782,7 +776,7 @@ function ModelList(props: {
                           <text
                             paddingLeft={2}
                             wrapMode="word"
-                            fg={rowSecondary(props.theme, active(), props.focused)}
+                            fg={rowSecondary(props.theme, active())}
                           >
                             {ref}
                           </text>
@@ -878,7 +872,7 @@ function VariantPane(props: {
                         gap={1}
                         paddingLeft={1}
                         paddingRight={1}
-                        backgroundColor={rowBackground(props.theme, active(), props.focused)}
+                        backgroundColor={rowBackground(props.theme, active())}
                         onMouseUp={() => props.onSelect(index())}
                         ref={(node: Renderable) => props.onRef(index(), node)}
                       >
@@ -892,7 +886,7 @@ function VariantPane(props: {
                           flexGrow={1}
                           overflow="hidden"
                           wrapMode="none"
-                          fg={rowForeground(props.theme, active(), props.focused)}
+                          fg={rowForeground(props.theme)}
                           attributes={active() ? TextAttributes.BOLD : undefined}
                         >
                           {option.label}

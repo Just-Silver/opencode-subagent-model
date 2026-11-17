@@ -429,6 +429,7 @@ test("宿主不能动态注册 Agent 时仍保留按 Agent 的模型覆盖，并
   const state = await handlers.getTeamPolicy({})
   assert.equal(state.ok, true)
   assert.equal(state.agentsSupported, false)
+  assert.match(state.agentsError ?? "", /register agents at runtime/)
   assert.equal((await intercept(host, subagentInput())).input.model, "provider-a/model-a#high")
 
   const saved = await handlers.setAgentModel({ agentID: "custom", model: "provider-a/model-a" })

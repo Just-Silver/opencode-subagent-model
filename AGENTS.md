@@ -38,6 +38,8 @@ npm 包名 `@justsilver/opencode-team`。
 # 验证命令
 
 ```text
+npm install --no-package-lock
+npm run typecheck
 node --test
 node scripts/changelog.mjs check
 npx --yes esbuild plugin/opencode-team/index.ts --bundle --platform=node --format=esm --outfile=dist/team-server.js
@@ -67,7 +69,7 @@ git diff --check
 - **每次发版前必须先用 question 工具向用户确认版本号**，确认后再改 `package.json` 与 CHANGELOG，不得自行决定。
 - 版本单一来源 `package.json`；`node scripts/changelog.mjs check` 保证 `package.json` 与 CHANGELOG 顶部一致，
   CI 与 Release 都跑它。
-- `.github/workflows/ci.yml`：版本一致 + 单测 + `npm pack --dry-run`。
+- `.github/workflows/ci.yml`：版本一致 + typecheck + 单测 + 双入口 esbuild + `npm pack --dry-run`。
 - `.github/workflows/release.yml`：push 预发布 tag → OIDC 发 `next`；**正式版只能手动 dispatch**（`publish`+`stable`）；
   默认手动运行只做打包预检。
 - **新包名的首个版本必须人工在交互终端发**（OIDC 建不了新包），之后才能登记 trusted publisher；

@@ -17,7 +17,6 @@ import {
   feedbackDismissMs,
   filterDashboardGroups,
   layoutFor,
-  PROMPT_NOTE,
   roleLabel,
   type DashboardAgent,
   type DashboardAgentInput,
@@ -47,13 +46,6 @@ import {
   type Theme,
 } from "./ui.tsx"
 
-export interface DashboardSession {
-  selectedID?: string
-  query: string
-  searching: boolean
-  pane: "list" | "detail"
-}
-
 export interface TeamDashboardProps {
   readonly agents: readonly DashboardAgentInput[]
   readonly overrides: Readonly<Record<string, string>>
@@ -62,7 +54,7 @@ export interface TeamDashboardProps {
   readonly modelError?: string
   readonly warning?: string
   readonly agentsSupported: boolean
-  readonly session: DashboardSession
+  readonly agentsError?: string
   readonly theme: Theme
   readonly layer: (factory: () => KeymapLayer) => void
   readonly clearDialog: () => void
@@ -82,16 +74,10 @@ export function TeamDashboard(props: TeamDashboardProps) {
   const [overrides, setOverrides] = createSignal(props.overrides)
   const initialGroups = buildDashboardGroups(props.agents, props.overrides, props.models, props.providers)
   const initialRows = initialGroups.flatMap((group) => group.agents)
-  const initialID =
-    props.session.selectedID !== undefined &&
-    initialRows.some((item) => item.id === props.session.selectedID)
-      ? props.session.selectedID
-      : (initialRows[0]?.id ?? "")
+  const initialID = initialRows[0]?.id ?? ""
   const [selectedID, setSelectedID] = createSignal(initialID)
-  const [query, setQuery] = createSignal(props.session.query)
-  const [searching, setSearching] = createSignal(props.session.searching)
-  const [pane, setPane] = createSignal(props.session.pane)
-  const [promptOpen, setPromptOpen] = createSignal(false)
+  const [query, setQuery] = createSignal("")
+  const [pane, setPane] = createSignal<"list" | "detail">("list")
   const [modelOpen, setModelOpen] = createSignal(false)
   const [configAgentID, setConfigAgentID] = createSignal<string>()
   const [feedback, setFeedback] = createSignal<Feedback>()
@@ -132,30 +118,24 @@ export function TeamDashboard(props: TeamDashboardProps) {
     if (agent !== undefined && agent.id !== selectedID()) setSelectedID(agent.id)
   })
 
-  createEffect(() => {
-    props.session.selectedID = selectedID()
-    props.session.query = query()
-    props.session.searching = searching()
-    props.session.pane = pane()
-  })
-
   let listScroll: ScrollBoxRenderable | undefined
   let detailScroll: ScrollBoxRenderable | undefined
-  let promptScroll: ScrollBoxRenderable | undefined
   let searchInput: InputRenderable | undefined
   let focusTimer: ReturnType<typeof setTimeout> | undefined
   let scrollTimer: ReturnType<typeof setTimeout> | undefined
   const rowNodes = new Map<string, Renderable>()
 
-  createEffect(
-    on(searching, (active) => {
-      if (!active) return
-      if (focusTimer !== undefined) clearTimeout(focusTimer)
-      focusTimer = setTimeout(() => {
-        if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.focus()
-      }, 1)
-    }),
-  )
+  function focusSearch(): void {
+    if (pendingRestore() !== undefined || restoring()) return
+    if (searchInput === undefined || searchInput.isDestroyed) return
+    searchInput.focus()
+    searchInput.cursorOffset = searchInput.value.length
+  }
+
+  function scheduleFocusSearch(): void {
+    if (focusTimer !== undefined) clearTimeout(focusTimer)
+    focusTimer = setTimeout(focusSearch, 1)
+  }
 
   createEffect(
     on(
@@ -208,21 +188,8 @@ export function TeamDashboard(props: TeamDashboardProps) {
   }
 
   function page(delta: number): void {
-    const target = promptOpen()
-      ? promptScroll
-      : layout().split || pane() === "detail"
-        ? detailScroll
-        : listScroll
+    const target = layout().split || pane() === "detail" ? detailScroll : listScroll
     target?.scrollBy(delta * 10)
-  }
-
-  function beginSearch(): void {
-    setSearching(true)
-  }
-
-  function leaveSearch(): void {
-    setQuery("")
-    setSearching(false)
   }
 
   async function choose(): Promise<void> {
@@ -257,6 +224,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
     if (restoring()) return
     setFeedback(undefined)
     setPendingRestore(agent)
+    if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.blur()
   }
 
   async function confirmRestoreNow(): Promise<void> {
@@ -265,11 +233,21 @@ export function TeamDashboard(props: TeamDashboardProps) {
     setPendingRestore(undefined)
     setRestoring(true)
     showFeedback({ tone: "info", message: `正在恢复 ${agent.name}…` })
-    const result = await props.restoreModel(agent)
-    if (disposed) return
-    setRestoring(false)
-    showFeedback({ tone: result.tone, message: result.message })
-    if (result.saved && result.models !== undefined) setOverrides(result.models)
+    try {
+      const result = await props.restoreModel(agent)
+      if (disposed) return
+      setRestoring(false)
+      showFeedback({ tone: result.tone, message: result.message })
+      if (result.saved && result.models !== undefined) setOverrides(result.models)
+    } catch (error) {
+      if (disposed) return
+      setRestoring(false)
+      showFeedback({
+        tone: "error",
+        message: `恢复原生模型失败：${error instanceof Error ? error.message : String(error)}`,
+      })
+    }
+    scheduleFocusSearch()
   }
 
   function close(): void {
@@ -286,56 +264,25 @@ export function TeamDashboard(props: TeamDashboardProps) {
         id: "opencode-team.dashboard.up",
         bind: "up",
         enabled: () => pendingRestore() === undefined,
-        run: () => {
-          if (promptOpen()) promptScroll?.scrollBy(-1)
-          else move(-1)
-        },
-      },
-      {
-        id: "opencode-team.dashboard.up.k",
-        bind: "k",
-        enabled: () => !searching() && pendingRestore() === undefined,
-        run: () => {
-          if (promptOpen()) promptScroll?.scrollBy(-1)
-          else move(-1)
-        },
+        run: () => move(-1),
       },
       {
         id: "opencode-team.dashboard.down",
         bind: "down",
         enabled: () => pendingRestore() === undefined,
-        run: () => {
-          if (promptOpen()) promptScroll?.scrollBy(1)
-          else move(1)
-        },
-      },
-      {
-        id: "opencode-team.dashboard.down.j",
-        bind: "j",
-        enabled: () => !searching() && pendingRestore() === undefined,
-        run: () => {
-          if (promptOpen()) promptScroll?.scrollBy(1)
-          else move(1)
-        },
+        run: () => move(1),
       },
       {
         id: "opencode-team.dashboard.first",
         bind: "home",
         enabled: () => pendingRestore() === undefined,
-        run: () => (promptOpen() ? promptScroll?.scrollTo(0) : first()),
+        run: first,
       },
       {
         id: "opencode-team.dashboard.last",
         bind: "end",
         enabled: () => pendingRestore() === undefined,
-        run: () => {
-          if (promptOpen()) {
-            const scroll = promptScroll
-            if (scroll !== undefined) scroll.scrollTo(scroll.scrollHeight)
-            return
-          }
-          last()
-        },
+        run: last,
       },
       {
         id: "opencode-team.dashboard.page_up",
@@ -358,22 +305,10 @@ export function TeamDashboard(props: TeamDashboardProps) {
         },
       },
       {
-        id: "opencode-team.dashboard.prompt",
-        bind: "p",
-        enabled: () => !searching() && pendingRestore() === undefined,
-        run: () => setPromptOpen((open) => !open),
-      },
-      {
         id: "opencode-team.dashboard.restore",
-        bind: "r",
-        enabled: () => !searching() && pendingRestore() === undefined,
+        bind: "ctrl+r",
+        enabled: () => pendingRestore() === undefined,
         run: requestRestore,
-      },
-      {
-        id: "opencode-team.dashboard.search",
-        bind: "slash,ctrl+f",
-        enabled: () => !searching() && pendingRestore() === undefined,
-        run: beginSearch,
       },
       {
         id: "opencode-team.dashboard.escape",
@@ -381,14 +316,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
         run: () => {
           if (pendingRestore() !== undefined) {
             setPendingRestore(undefined)
-            return
-          }
-          if (promptOpen()) {
-            setPromptOpen(false)
-            return
-          }
-          if (searching()) {
-            leaveSearch()
+            scheduleFocusSearch()
             return
           }
           if (!layout().split && pane() === "detail") {
@@ -456,7 +384,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
         <Header
           theme={theme()}
           layout={layout()}
-          searching={searching()}
+          pane={pane()}
           confirming={pendingRestore() !== undefined}
         />
         <Show when={!layout().minimal}>
@@ -467,59 +395,53 @@ export function TeamDashboard(props: TeamDashboardProps) {
         <Banners
           theme={theme()}
           agentsSupported={props.agentsSupported}
+          {...(props.agentsError === undefined ? {} : { agentsError: props.agentsError })}
           modelError={props.modelError}
           warning={props.warning}
         />
 
-        <Show
-          when={!promptOpen()}
-          fallback={
-            <PromptPane
+        <box paddingTop={1} flexShrink={0}>
+          <SearchField
+            theme={theme()}
+            query={query()}
+            inputRef={(value) => {
+              searchInput = value
+              scheduleFocusSearch()
+            }}
+            onFocus={focusSearch}
+            onInput={(value) => setQuery(value)}
+          />
+        </box>
+
+        <box flexGrow={1} minHeight={0} flexDirection="row">
+          <Show when={showList()}>
+            <ListPane
+              theme={theme()}
+              groups={groups()}
+              selectedID={selected()?.id}
+              compact={layout().compact}
+              width={split() ? layout().listWidth : undefined}
+              onSelect={(id) => {
+                if (pendingRestore() !== undefined) return
+                setSelectedID(id)
+                scheduleFocusSearch()
+              }}
+              onRef={(id, node) => rowNodes.set(id, node)}
+              onScrollRef={(value) => (listScroll = value)}
+            />
+          </Show>
+          <Show when={split()}>
+            <box width={1} flexShrink={0} backgroundColor={theme().border.base} />
+          </Show>
+          <Show when={showDetail()}>
+            <DetailPane
               theme={theme()}
               agent={agent()}
-              promptScroll={(value) => (promptScroll = value)}
               compact={layout().compact}
+              onScrollRef={(value) => (detailScroll = value)}
             />
-          }
-        >
-          <box flexGrow={1} minHeight={0} flexDirection="row">
-            <Show when={showList()}>
-              <ListPane
-                theme={theme()}
-                groups={groups()}
-                selectedID={selected()?.id}
-                compact={layout().compact}
-                focused={!searching()}
-                width={split() ? layout().listWidth : undefined}
-                onSelect={(id) => {
-                  if (pendingRestore() !== undefined) return
-                  setSelectedID(id)
-                }}
-                onRef={(id, node) => rowNodes.set(id, node)}
-                onScrollRef={(value) => (listScroll = value)}
-              />
-            </Show>
-            <Show when={split()}>
-              <box width={1} flexShrink={0} backgroundColor={theme().border.base} />
-            </Show>
-            <Show when={showDetail()}>
-              <DetailPane
-                theme={theme()}
-                agent={agent()}
-                compact={layout().compact}
-                onScrollRef={(value) => (detailScroll = value)}
-              />
-            </Show>
-          </box>
-        </Show>
-
-        <SearchBar
-          visible={searching()}
-          query={query()}
-          theme={theme()}
-          inputRef={(value) => (searchInput = value)}
-          onInput={(value) => setQuery(value)}
-        />
+          </Show>
+        </box>
 
         <Show when={pendingRestore()}>
           {(pending) => (
@@ -540,8 +462,6 @@ export function TeamDashboard(props: TeamDashboardProps) {
         <Footer
           theme={theme()}
           minimal={layout().minimal}
-          promptOpen={promptOpen()}
-          searching={searching()}
           split={split()}
           pane={pane()}
           agent={agent()}
@@ -555,9 +475,14 @@ export function TeamDashboard(props: TeamDashboardProps) {
 function Header(props: {
   readonly theme: Theme
   readonly layout: ReturnType<typeof layoutFor>
-  readonly searching: boolean
+  readonly pane: "list" | "detail"
   readonly confirming: boolean
 }) {
+  const escapeLabel = () => {
+    if (props.confirming) return "ESC 取消"
+    if (!props.layout.split && props.pane === "detail") return "ESC 返回"
+    return "ESC 关闭"
+  }
   return (
     <box flexDirection="column" flexShrink={0}>
       <box flexDirection="row" justifyContent="space-between" gap={2}>
@@ -567,14 +492,10 @@ function Header(props: {
           </text>
           <text fg={props.theme.text.muted}>团队管理</text>
         </box>
-        <text fg={props.theme.text.muted}>{props.confirming ? "ESC 取消" : "ESC 关闭"}</text>
+        <text fg={props.theme.text.muted}>{escapeLabel()}</text>
       </box>
-      <Show when={!props.layout.minimal && !props.searching}>
-        <box flexDirection="row" gap={1}>
-          <text fg={props.theme.text.muted}>模型策略只覆盖子代理</text>
-          <text fg={props.theme.text.muted}>·</text>
-          <text fg={props.theme.text.muted}>按 / 搜索</text>
-        </box>
+      <Show when={!props.layout.minimal}>
+        <text fg={props.theme.text.muted}>模型策略只覆盖子代理</text>
       </Show>
     </box>
   )
@@ -583,17 +504,22 @@ function Header(props: {
 function Banners(props: {
   readonly theme: Theme
   readonly agentsSupported: boolean
+  readonly agentsError?: string
   readonly modelError?: string
   readonly warning?: string
 }) {
   const messages = () => {
     const list: string[] = []
     if (!props.agentsSupported) {
-      list.push("宿主不能动态注册团队 Agent；Orchestrator、QA、Reviewer 可能不可用。")
+      list.push(
+        props.agentsError === undefined
+          ? "宿主不能动态注册团队 Agent；Orchestrator、QA、Reviewer 可能不可用。"
+          : `团队 Agent 注册失败：${props.agentsError}`,
+      )
     }
     if (props.warning !== undefined) list.push(props.warning)
     if (props.modelError !== undefined) {
-      list.push(`${props.modelError}；模型名称回退为引用，选择模型时会重试。`)
+      list.push(`${props.modelError}；模型名称回退为引用，保存时由服务端重新校验。`)
     }
     return list
   }
@@ -617,7 +543,6 @@ function ListPane(props: {
   readonly groups: readonly DashboardGroup[]
   readonly selectedID?: string
   readonly compact: boolean
-  readonly focused: boolean
   readonly width?: number
   readonly onSelect: (id: string) => void
   readonly onRef: (id: string, node: Renderable) => void
@@ -664,7 +589,7 @@ function ListPane(props: {
                         flexDirection="column"
                         paddingLeft={1}
                         paddingRight={1}
-                        backgroundColor={rowBackground(props.theme, active(), props.focused)}
+                        backgroundColor={rowBackground(props.theme, active())}
                         onMouseUp={() => props.onSelect(agent.id)}
                         ref={(node: Renderable) => props.onRef(agent.id, node)}
                       >
@@ -676,7 +601,7 @@ function ListPane(props: {
                             flexGrow={1}
                             overflow="hidden"
                             wrapMode="none"
-                            fg={rowForeground(props.theme, active(), props.focused)}
+                            fg={rowForeground(props.theme)}
                             attributes={active() ? TextAttributes.BOLD : undefined}
                           >
                             {agent.name}
@@ -684,8 +609,8 @@ function ListPane(props: {
                           <text
                             flexShrink={0}
                             fg={
-                              active() && props.focused
-                                ? props.theme.text.action.primary.focused
+                              active()
+                                ? props.theme.text.base
                                 : toneColor(props.theme, statusTone(agent.status))
                             }
                           >
@@ -697,7 +622,7 @@ function ListPane(props: {
                             <text
                               flexGrow={1}
                               wrapMode="word"
-                              fg={rowSecondary(props.theme, active(), props.focused)}
+                              fg={rowSecondary(props.theme, active())}
                             >
                               {agent.modelLabel}
                             </text>
@@ -828,11 +753,8 @@ function DetailPane(props: {
                     </text>
                   }
                 >
-                  <text fg={props.theme.text.muted} wrapMode="word">
-                    {agent().prompt.preview}
-                  </text>
-                  <text fg={props.theme.text.muted} wrapMode="word">
-                    按 P 查看完整提示词（{agent().prompt.lineCount ?? 0} 行）
+                  <text fg={props.theme.text.base} wrapMode="word">
+                    {agent().prompt.text}
                   </text>
                 </Show>
               </Section>
@@ -844,83 +766,9 @@ function DetailPane(props: {
   )
 }
 
-function PromptPane(props: {
-  readonly theme: Theme
-  readonly agent?: DashboardAgent
-  readonly promptScroll: (value: ScrollBoxRenderable) => void
-  readonly compact: boolean
-}) {
-  return (
-    <box flexGrow={1} minHeight={0} flexDirection="column">
-      <Show
-        when={props.agent}
-        fallback={
-          <box paddingTop={1}>
-            <text fg={props.theme.text.muted}>没有可显示的 Agent。</text>
-          </box>
-        }
-      >
-        {(agent) => (
-          <>
-            <box flexDirection="row" justifyContent="space-between" gap={2}>
-              <box flexDirection="row" gap={2}>
-                <text fg={props.theme.text.base} attributes={TextAttributes.BOLD}>
-                  System Prompt
-                </text>
-                <text fg={props.theme.text.muted}>{agent().name}</text>
-              </box>
-              <Badge theme={props.theme} text="只读" tone="neutral" />
-            </box>
-            <box paddingTop={1} flexShrink={0}>
-              <text fg={props.theme.text.muted} wrapMode="word">
-                来源：宿主当前生效的 Agent 定义（agent.system）
-              </text>
-            </box>
-            <Divider theme={props.theme} />
-            <scrollbox
-              flexGrow={1}
-              minHeight={0}
-              verticalScrollbarOptions={scrollbarOptions(props.theme)}
-              horizontalScrollbarOptions={{ visible: false }}
-              ref={props.promptScroll}
-            >
-              <box paddingRight={1}>
-                <Show
-                  when={agent().prompt.available}
-                  fallback={
-                    <box flexDirection="column" gap={1}>
-                      <text fg={props.theme.text.feedback.warning.base} wrapMode="word">
-                        {agent().prompt.reason}
-                      </text>
-                      <text fg={props.theme.text.muted} wrapMode="word">
-                        面板不会生成、补全或伪造提示词。
-                      </text>
-                    </box>
-                  }
-                >
-                  <text fg={props.theme.text.base} wrapMode="word">
-                    {agent().prompt.text}
-                  </text>
-                  <box paddingTop={1}>
-                    <text fg={props.theme.text.muted} wrapMode="word">
-                      {PROMPT_NOTE}
-                    </text>
-                  </box>
-                </Show>
-              </box>
-            </scrollbox>
-          </>
-        )}
-      </Show>
-    </box>
-  )
-}
-
 function Footer(props: {
   readonly theme: Theme
   readonly minimal: boolean
-  readonly promptOpen: boolean
-  readonly searching: boolean
   readonly split: boolean
   readonly pane: "list" | "detail"
   readonly agent?: DashboardAgent
@@ -934,21 +782,6 @@ function Footer(props: {
         { key: "ESC", label: "取消" },
       ]
     }
-    if (props.promptOpen) {
-      return [
-        { key: "↑↓", label: "滚动" },
-        { key: "PgUp/PgDn", label: "翻页" },
-        { key: "ESC", label: "返回" },
-      ]
-    }
-    if (props.searching) {
-      return [
-        { key: "输入", label: "筛选" },
-        { key: "↑↓", label: "选择" },
-        { key: "Enter", label: enter() },
-        { key: "ESC", label: "退出搜索" },
-      ]
-    }
     if (props.minimal) {
       return [
         { key: "↑↓", label: "选择" },
@@ -959,25 +792,20 @@ function Footer(props: {
       return [
         { key: "↑↓", label: "选择" },
         { key: "Enter", label: "详情" },
-        { key: "/", label: "搜索" },
         { key: "ESC", label: "关闭" },
       ]
     }
     if (!props.split) {
       return [
-        { key: "ESC", label: "返回" },
         { key: "Enter", label: enter() },
-        { key: "P", label: "提示词" },
-        { key: "R", label: "恢复原生" },
-        { key: "/", label: "搜索" },
+        { key: "Ctrl+R", label: "恢复原生" },
+        { key: "ESC", label: "返回" },
       ]
     }
     return [
       { key: "↑↓", label: "选择" },
       { key: "Enter", label: enter() },
-      { key: "P", label: "提示词" },
-      { key: "R", label: "恢复原生" },
-      { key: "/", label: "搜索" },
+      { key: "Ctrl+R", label: "恢复原生" },
       { key: "ESC", label: "关闭" },
     ]
   }
@@ -994,33 +822,38 @@ function Footer(props: {
 }
 
 /**
- * The search input lives outside the main row so opening it never shifts the split layout.
- * It is mounted only while searching, which keeps printable shortcuts working the rest of the time.
+ * 搜索框常驻并默认聚焦，直接输入即过滤；不再有进入/退出搜索的模式，
+ * 因此列表导航只保留方向键，单字母按键都作为查询输入。
  */
-function SearchBar(props: {
-  readonly visible: boolean
+function SearchField(props: {
   readonly query: string
   readonly theme: Theme
   readonly inputRef: (value: InputRenderable) => void
+  readonly onFocus: () => void
   readonly onInput: (value: string) => void
 }) {
   return (
-    <Show when={props.visible}>
-      <box flexShrink={0} paddingTop={1} flexDirection="row" gap={1}>
-        <text fg={props.theme.text.muted}>搜索</text>
-        <input
-          flexGrow={1}
-          value={props.query}
-          onInput={props.onInput}
-          placeholder="Agent 名称 / 角色 / 模型…"
-          placeholderColor={props.theme.text.muted}
-          focusedBackgroundColor={props.theme.background.formfield.focused}
-          focusedTextColor={props.theme.text.formfield.focused}
-          cursorColor={props.theme.text.formfield.focused}
-          ref={props.inputRef}
-        />
-      </box>
-    </Show>
+    <box
+      flexDirection="row"
+      gap={1}
+      paddingLeft={1}
+      paddingRight={1}
+      backgroundColor={props.theme.background.formfield.focused}
+      onMouseDown={props.onFocus}
+    >
+      <text fg={props.theme.text.formfield.focused}>搜索</text>
+      <input
+        flexGrow={1}
+        value={props.query}
+        onInput={props.onInput}
+        placeholder="Agent 名称 / 角色 / 模型…"
+        placeholderColor={props.theme.text.muted}
+        focusedBackgroundColor={props.theme.background.formfield.focused}
+        focusedTextColor={props.theme.text.formfield.focused}
+        cursorColor={props.theme.text.formfield.focused}
+        ref={props.inputRef}
+      />
+    </box>
   )
 }
 

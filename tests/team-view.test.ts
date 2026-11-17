@@ -10,7 +10,6 @@ import {
   buildDashboardAgent,
   buildDashboardGroups,
   buildModelRef,
-  currentModelSelection,
   effectTone,
   feedbackDismissMs,
   filterDashboardGroups,
@@ -147,11 +146,6 @@ function fakeStorage(initial?: Record<string, unknown>): FakeStorage {
   return state
 }
 
-type Step =
-  | { kind: "select"; value?: unknown }
-  | { kind: "title"; title: string }
-  | { kind: "value"; value: unknown }
-
 interface HarnessInput {
   readonly policy?: Record<string, string>
   readonly models?: readonly TestModel[]
@@ -159,7 +153,6 @@ interface HarnessInput {
   readonly providers?: readonly TestProvider[]
   readonly location?: { directory: string }
   readonly defaultLocation?: { directory: string }
-  readonly script?: Step[]
   readonly hook?: boolean
   readonly storage?: FakeStorage
   readonly getThrows?: Error
@@ -168,7 +161,6 @@ interface HarnessInput {
   readonly agentsSyncError?: boolean
   readonly agentsCache?: boolean
   readonly agentsListError?: boolean
-  readonly agentsAlwaysUnloaded?: boolean
   readonly modelsSyncError?: boolean
   readonly modelsListError?: boolean
   readonly modelsAlwaysUnloaded?: boolean
@@ -184,8 +176,6 @@ async function harness(input: HarnessInput) {
     modelSyncLocations: [] as unknown[],
     providerListLocations: [] as unknown[],
     toast: [] as Array<{ variant?: string; message: string }>,
-    selects: [] as any[],
-    dialogOptions: [] as any[],
   }
   const storage =
     input.storage ??
@@ -193,7 +183,6 @@ async function harness(input: HarnessInput) {
   const catalog = input.models ?? [ALPHA, BETA, VISION]
   const agentList = input.agents ?? AGENTS
   const providers = input.providers ?? PROVIDERS
-  const queue = [...(input.script ?? [])]
 
   const policyContext: TeamPolicyContext = {
     storage: storage.api,
@@ -235,7 +224,6 @@ async function harness(input: HarnessInput) {
           list: (location: unknown) => {
             calls.agentListLocations.push(location)
             if (input.agentsListError === true) throw new Error("Agent 目录读取失败")
-            if (input.agentsAlwaysUnloaded === true) return undefined
             if (input.agentsSyncError === true && input.agentsCache === false) return undefined
             return [...agentList]
           },
@@ -274,19 +262,9 @@ async function harness(input: HarnessInput) {
         show: (options: { variant?: string; message: string }) => calls.toast.push(options),
       },
       dialog: {
-        set: (options: any) => calls.dialogOptions.push(options),
+        set: () => {},
         show: () => {},
         clear: () => {},
-        select: async (options: any) => {
-          calls.selects.push(options)
-          const step = queue.shift()
-          if (step === undefined) throw new Error("测试脚本用完了：界面打开了额外的选择框")
-          if (step.kind === "select") return step.value
-          if (step.kind === "value") return step.value
-          const option = options.options.find((candidate: any) => candidate.title === step.title)
-          assert.ok(option, `选择框里应有「${step.title}」`)
-          return option.value
-        },
       },
     },
   }
@@ -314,12 +292,12 @@ test("失效覆盖单独成组，仍允许清除旧设置", () => {
   const groups = buildDashboardGroups(inputs(), { removed: "provider-a/alpha" }, [ALPHA], PROVIDERS)
   const unavailable = groups.find((group) => group.key === "unavailable")
   assert.ok(unavailable)
-  assert.match(unavailable.title, /已保存但当前不可用/)
+  assert.match(unavailable.title, /已保存但不在团队视图/)
   assert.equal(unavailable.agents[0]!.id, "removed")
   assert.equal(unavailable.agents[0]!.known, false)
   assert.equal(unavailable.agents[0]!.canRestore, true)
   assert.equal(unavailable.agents[0]!.canConfigure, false)
-  assert.match(unavailable.agents[0]!.prompt.reason ?? "", /不在当前目录/)
+  assert.match(unavailable.agents[0]!.prompt.reason ?? "", /不在团队视图/)
 })
 
 test("模型状态区分原生、继承与自定义，并标注来源", () => {
@@ -374,8 +352,6 @@ test("System Prompt 来自宿主定义；缺失或空白时明确说明，不生
   const prompt = promptInfo("line one\r\nline two")
   assert.equal(prompt.available, true)
   assert.equal(prompt.text, "line one\nline two")
-  assert.equal(prompt.lineCount, 2)
-  assert.match(prompt.preview ?? "", /line one/)
 
   const missing = promptInfo(undefined)
   assert.equal(missing.available, false)
@@ -388,17 +364,6 @@ test("System Prompt 来自宿主定义；缺失或空白时明确说明，不生
     assert.equal(info.text, undefined)
     assert.match(info.reason ?? "", /宿主未为该 Agent 提供独立 System Prompt/)
   }
-})
-
-test("预览只截取开头，完整 Prompt 保留全文", () => {
-  const system = Array.from({ length: 40 }, (_, index) => `line ${index + 1}`).join("\n")
-  const info = promptInfo(system)
-  assert.equal(info.available, true)
-  assert.equal(info.text, system)
-  assert.equal(info.lineCount, 40)
-  assert.match(info.preview ?? "", /line 12/)
-  assert.doesNotMatch(info.preview ?? "", /line 13/)
-  assert.match(info.preview ?? "", /…/)
 })
 
 test("权限摘要按最后命中规则去重，并保留关键限制", () => {
@@ -554,6 +519,13 @@ test("旧插件冲突、hook 不支持与策略读取失败都阻止打开", asy
   if (corrupt.kind === "blocked") assert.match(corrupt.message, /无法读取团队模型设置/)
 })
 
+test("读取团队模型设置 RPC 抛错时阻止打开", async () => {
+  const h = await harness({ getThrows: new Error("rpc down"), location: CURRENT_LOCATION })
+  const result = await loadTeamDashboard(h.ctx, CURRENT_LOCATION)
+  assert.equal(result.kind, "blocked")
+  if (result.kind === "blocked") assert.match(result.message, /无法读取团队模型设置/)
+})
+
 test("宿主不能动态注册团队 Agent 时仍返回面板数据并标记受限", async () => {
   const h = await harness({ agentsSupported: false, location: CURRENT_LOCATION })
   const result = await loadTeamDashboard(h.ctx, CURRENT_LOCATION)
@@ -690,23 +662,7 @@ test("Variant 来自模型实际能力，引用按是否选择 Variant 生成", 
   )
 })
 
-test("当前模型选择从团队覆盖或 Agent 配置解析，缺省时为空", () => {
-  assert.deepEqual(currentModelSelection(dashboardAgent("qa", { qa: "provider-a/alpha#high" })), {
-    baseRef: "provider-a/alpha",
-    variant: "high",
-  })
-  assert.deepEqual(
-    currentModelSelection(
-      buildDashboardGroups(
-        inputs([{ id: "reviewer", name: "Reviewer", mode: "subagent", model: { id: "beta", providerID: "provider-b", variant: "x" } }]),
-        {},
-        [ALPHA, BETA],
-        PROVIDERS,
-      )[0]!.agents[0]!,
-    ),
-    { baseRef: "provider-b/beta", variant: "x" },
-  )
-  assert.equal(currentModelSelection(dashboardAgent("qa")), undefined)
+test("模型引用按基础引用解析", () => {
   assert.equal(resolveModel([ALPHA], "provider-a/alpha")?.id, "alpha")
 })
 

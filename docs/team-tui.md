@@ -39,11 +39,12 @@ JSX 只在 `view/*.tsx` 中出现。
 - Agent 定义：`ctx.data.location.agent.sync()` 后读取。同步失败但存在缓存时继续展示，
   并明确标注内容可能不是最新；没有缓存则报错，不打开面板。
 - 模型目录与供应商：只用于展示名称和模型选择；目录失败时面板仍可查看 Agent 与 Prompt，
-  模型名称回退为原始引用，选择模型时再重试。
+  模型名称回退为原始引用；保存时由服务端重新校验。
 - 策略冲突、缺少工具钩子、策略损坏：按原有安全路径直接阻止打开。
 
-Dashboard 只展示团队范围：Orchestrator、所有可见子代理，以及已保存但当前不可用的覆盖。
-Build/Plan 等其他 primary 不进入列表；隐藏 Agent 不展示。模型覆盖仍然只写子代理。
+Dashboard 只展示团队范围：Orchestrator、所有可见子代理，以及已保存但不在团队视图的覆盖。
+Build/Plan 等其他 primary 和隐藏 Agent 不进入团队列表；如果它们已有保存的覆盖，会出现在
+「已保存但不在团队视图」中，只能清除。模型覆盖仍然只写子代理。
 
 ## 模型状态
 
@@ -60,11 +61,9 @@ Build/Plan 等其他 primary 不进入列表；隐藏 Agent 不展示。模型�
 ## System Prompt
 
 - 完整内容来自宿主当前生效的 `AgentInfo.system`，界面只读。
+- 详情区直接显示完整 Prompt，复用详情面板已有的滚动条，不再有预览或独立的 Prompt 页。
 - `agent.system` 缺失或为空白时，面板明确说明宿主没有提供独立 System Prompt，
   不生成、不补全、不伪造内容。
-- `AgentInfo.system` 只是 Agent 定义中的 System Prompt；请求时宿主还会附加全局
-  instructions、工具说明与环境信息，插件无法读取完整拼装结果。界面会明确说明这一点。
-- `P` 打开完整 Prompt 页，可滚动；`P` 或 `ESC` 返回 Dashboard。
 
 ## 权限摘要
 
@@ -85,8 +84,8 @@ Build/Plan 等其他 primary 不进入列表；隐藏 Agent 不展示。模型�
   未选中行的占位标记等不承载信息的位置。
 - Provider 分组标题使用宿主强调色阶 `theme.hue.accent[200]`（默认主题为紫色）并加粗，
   与模型名称形成层级；右侧数量使用次要文字色。
-- 选中态分强弱：当前键盘焦点区域用 `background.action.primary.focused` 主操作色填充，
-  失焦但仍有选中的区域退回 `background.raised.high`；两者都带左侧指示条。
+- 选中行统一使用 `background.raised.high` 抬升表面、强调色左侧指示条和 `text.base` 正文；
+  不再用整行主操作色填充。当前操作区域由面板边框或标题表示。
 - 状态语义固定：原生 / 继承用次要文字色，自定义用主题强调色；权限拒绝用错误色、
   询问用警告色，允许规则保持中性以减少干扰。Badge 背景由
   `theme.decrease(theme.background.base)` 从主题推导，不在组件里维护另一套颜色。
@@ -104,14 +103,13 @@ Dashboard：
 
 | 按键 | 行为 |
 |---|---|
-| `↑↓` / `j k` | 选择 Agent；Prompt 页滚动 |
-| `Home` / `End` | 首个/最后一个 Agent；Prompt 页到顶/到底 |
-| `PgUp` / `PgDn` | 滚动详情或 Prompt |
+| 直接输入 | 顶部搜索框常驻并默认聚焦，输入即过滤 Agent |
+| `↑↓` | 选择 Agent |
+| `Home` / `End` | 首个/最后一个 Agent |
+| `PgUp` / `PgDn` | 滚动详情或列表 |
 | `Enter` | 打开内嵌模型配置；单栏模式下先进入详情；确认条出现时执行确认 |
-| `P` | 完整 System Prompt / 返回 |
-| `R` | 清除团队覆盖；无覆盖时只提示；执行前在 Modal 内确认 |
-| `/` | 进入搜索 |
-| `ESC` | 取消确认 / 退出搜索 / 返回列表 / 关闭面板 |
+| `Ctrl+R` | 清除团队覆盖；无覆盖时只提示；执行前在 Modal 内确认 |
+| `ESC` | 取消确认 / 返回列表 / 关闭面板 |
 
 模型配置：
 
@@ -126,14 +124,15 @@ Dashboard：
 | `PgUp` / `PgDn` | 滚动模型或 Variant |
 | `ESC` | 取消确认 / 返回 Dashboard，不保存 |
 
-搜索框与 OpenCode `/model` 一样默认聚焦，不需要先按 `/`；Backspace、Delete、粘贴和中文输入法
-都由宿主输入组件处理。`j`、`k`、`r`、`/` 会作为普通字符输入查询，不再触发导航或恢复。
-过滤实时更新 Provider 分组与数量，空分组不显示；没有结果时显示明确提示，清空查询后恢复完整列表。
-搜索变化后选中项落到第一个可见模型，没有可见模型时不保留旧选中项。
+Dashboard 与模型配置的搜索框都常驻并默认聚焦，不需要按 `/` 进入搜索；Backspace、Delete、
+粘贴和中文输入法都由宿主输入组件处理。`j`、`k`、`r`、`/` 会作为普通字符输入查询，
+不再触发导航或恢复。模型配置的过滤实时更新 Provider 分组与数量，空分组不显示；没有结果时
+显示明确提示，清空查询后恢复完整列表。搜索变化后选中项落到第一个可见模型，没有可见模型时
+不保留旧选中项。
 
 - 宽度 `< 90`：Dashboard 单栏，列表与详情切换；模型配置也只显示当前焦点面板。
 - 高度 `< 20` 或宽度 `< 100`：Agent/模型行使用紧凑布局。
-- 宽度 `< 50`：只保留核心快捷键；模型配置搜索栏始终显示，支持直接输入。
+- 宽度 `< 50`：只保留核心快捷键；Dashboard 与模型配置的搜索框始终显示，支持直接输入。
 - 尺寸变化通过 `useTerminalDimensions()` 响应式重算。
 
 ## 内嵌模型配置
@@ -174,6 +173,8 @@ Dashboard：
 ## 验证
 
 ```bash
+npm install --no-package-lock
+npm run typecheck
 node --test
 npx --yes esbuild plugin/opencode-team/tui.ts --bundle --platform=node --format=esm \
   --jsx=automatic --jsx-import-source=@opentui/solid \

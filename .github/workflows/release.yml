@@ -44,8 +44,19 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
+      - name: 安装开发依赖
+        run: npm install --no-audit --no-fund --no-package-lock
+
+      - name: 类型检查
+        run: npm run typecheck
+
       - name: 单测
         run: node --test
+
+      - name: 入口构建预检
+        run: |
+          npx --yes esbuild plugin/opencode-team/index.ts --bundle --platform=node --format=esm --outfile=/tmp/team-server.js
+          npx --yes esbuild plugin/opencode-team/tui.ts --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:@opentui/core --external:@opentui/solid --external:solid-js --outfile=/tmp/team-tui.js
 
       - name: 版本一致性（tag == package.json == CHANGELOG）
         env:

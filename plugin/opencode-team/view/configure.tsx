@@ -1,7 +1,7 @@
 /** @jsxImportSource @opentui/solid */
 import type { Plugin } from "@opencode/plugin/tui"
 
-import { TeamDashboard, type DashboardSession } from "./dashboard.tsx"
+import { TeamDashboard } from "./dashboard.tsx"
 import type { DashboardAgent } from "./model.ts"
 import {
   currentLocation,
@@ -27,11 +27,6 @@ export async function configureTeam(ctx: Plugin.Context): Promise<void> {
   const data = result.data
   let overrides: Readonly<Record<string, string>> = data.overrides
   let closed = false
-  const session: DashboardSession = {
-    query: "",
-    searching: false,
-    pane: "list",
-  }
 
   const open = (): void => {
     if (token !== latest || closed) return
@@ -45,7 +40,7 @@ export async function configureTeam(ctx: Plugin.Context): Promise<void> {
           {...(data.modelError === undefined ? {} : { modelError: data.modelError })}
           {...(data.warning === undefined ? {} : { warning: data.warning })}
           agentsSupported={data.agentsSupported}
-          session={session}
+          {...(data.agentsError === undefined ? {} : { agentsError: data.agentsError })}
           theme={ctx.theme}
           layer={(factory) => ctx.keymap.layer(factory)}
           clearDialog={() => ctx.ui.dialog.clear()}

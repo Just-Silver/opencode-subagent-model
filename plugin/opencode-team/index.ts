@@ -24,8 +24,6 @@ export default {
   id: teamRpc.id,
   async setup(ctx: SetupContext) {
     const agents = await registerTeamAgents(ctx)
-    const legacy = await detectLegacyPlugin(ctx)
-    const initialConflict = legacy.active ? legacy.conflict : undefined
     const detect = async () => {
       const next = await detectLegacyPlugin(ctx)
       // A transient inventory failure must not re-enable enforcement beside a known old plugin.
@@ -33,8 +31,8 @@ export default {
       return next.active ? next.conflict : undefined
     }
     const handlers = await registerTeamPolicy(ctx, {
-      ...(initialConflict === undefined ? {} : { conflict: initialConflict }),
       agentsSupported: agents.supported,
+      ...(agents.error === undefined ? {} : { agentsError: agents.error }),
       fallbackAgents: TEAM_SUBAGENT_IDS,
       resolveConflict: detect,
     })

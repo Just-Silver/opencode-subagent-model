@@ -1,15 +1,15 @@
 import type { AgentInfo, ModelInfo, ProviderInfo } from "@opencode/client"
 
+import { formatModelRef, isChatModel, parseModelRef } from "../model-ref.ts"
+import { TEAM_SUBAGENT_IDS } from "../team-ids.ts"
+
+export { formatModelRef, parseModelRef } from "../model-ref.ts"
+export type { ModelRef as ParsedModelRef } from "../model-ref.ts"
+
 export type AgentMode = AgentInfo["mode"]
 export type ModelStatus = "native" | "inherit" | "custom"
 export type ModelSource = "team" | "agent" | "none"
 export type PermissionEffect = "allow" | "deny" | "ask"
-
-export interface ParsedModelRef {
-  readonly providerID: string
-  readonly id: string
-  readonly variant?: string
-}
 
 export interface DashboardAgentInput {
   readonly id: string
@@ -26,8 +26,6 @@ export interface DashboardAgentInput {
 export interface PromptInfo {
   readonly available: boolean
   readonly text?: string
-  readonly preview?: string
-  readonly lineCount?: number
   readonly reason?: string
 }
 
@@ -130,30 +128,11 @@ export function nextRegion(region: ConfigRegion, hasVariants: boolean): ConfigRe
   return region === "models" ? "variants" : "models"
 }
 
-const PREFERRED_SUBAGENTS = ["general", "explore", "qa", "reviewer"] as const
-const PROMPT_UNAVAILABLE =
-  "宿主未为该 Agent 提供独立 System Prompt。运行时由宿主拼装全局指令、工具说明与环境信息，插件无法读取这部分内容。"
+const PROMPT_UNAVAILABLE = "宿主未为该 Agent 提供独立 System Prompt。"
 
 function preferredRank(id: string): number {
-  const index = PREFERRED_SUBAGENTS.indexOf(id as (typeof PREFERRED_SUBAGENTS)[number])
-  return index === -1 ? PREFERRED_SUBAGENTS.length : index
-}
-
-export function parseModelRef(input: string): ParsedModelRef | undefined {
-  const providerEnd = input.indexOf("/")
-  if (providerEnd <= 0) return undefined
-  const variantStart = input.indexOf("#", providerEnd + 1)
-  const providerID = input.slice(0, providerEnd)
-  const id = input.slice(providerEnd + 1, variantStart === -1 ? undefined : variantStart)
-  const variant = variantStart === -1 ? undefined : input.slice(variantStart + 1)
-  if (!id || providerID.includes("#") || (variant !== undefined && (!variant || variant.includes("#")))) {
-    return undefined
-  }
-  return { providerID, id, ...(variant === undefined ? {} : { variant }) }
-}
-
-export function formatModelRef(ref: ParsedModelRef): string {
-  return `${ref.providerID}/${ref.id}${ref.variant === undefined ? "" : `#${ref.variant}`}`
+  const index = TEAM_SUBAGENT_IDS.indexOf(id as (typeof TEAM_SUBAGENT_IDS)[number])
+  return index === -1 ? TEAM_SUBAGENT_IDS.length : index
 }
 
 export function hostModelRef(model: AgentInfo["model"]): string | undefined {
@@ -177,11 +156,6 @@ export interface ModelGroup {
   readonly models: readonly ModelInfo[]
 }
 
-export interface ModelSelection {
-  readonly baseRef: string
-  readonly variant?: string
-}
-
 export interface ModelConfigLayout extends DashboardLayout {
   readonly variantWidth: number
 }
@@ -194,17 +168,6 @@ export function roleLabel(mode: AgentMode): string {
   if (mode === "primary") return "PRIMARY"
   if (mode === "all") return "ALL"
   return "SUBAGENT"
-}
-
-export function currentModelSelection(agent: DashboardAgent): ModelSelection | undefined {
-  const ref = agent.teamModel ?? agent.hostModel
-  if (ref === undefined) return undefined
-  const parsed = parseModelRef(ref)
-  if (parsed === undefined) return undefined
-  return {
-    baseRef: `${parsed.providerID}/${parsed.id}`,
-    ...(parsed.variant === undefined ? {} : { variant: parsed.variant }),
-  }
 }
 
 export function resolveModel(
@@ -247,7 +210,7 @@ export function modelGroups(
   const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const byProvider = new Map<string, { name: string; models: ModelInfo[] }>()
   for (const model of models) {
-    if (model.type !== undefined && model.type !== "chat") continue
+    if (!isChatModel(model)) continue
     const provider = providerLabel(providers, model.providerID)
     const text = [model.name, model.id, model.providerID, provider, modelRefOf(model)]
       .join(" ")
@@ -328,15 +291,9 @@ export function promptInfo(system: string | undefined): PromptInfo {
   if (text.trim() === "") return { available: false, reason: PROMPT_UNAVAILABLE }
   const lines = text.split("\n")
   if (lines.length > 0 && lines.at(-1) === "") lines.pop()
-  const previewLines = lines.slice(0, 12)
-  let preview = previewLines.join("\n")
-  if (lines.length > previewLines.length) preview += "\n…"
-  if (preview.length > 900) preview = `${preview.slice(0, 900)}…`
   return {
     available: true,
     text: lines.join("\n"),
-    preview,
-    lineCount: lines.length,
   }
 }
 
@@ -409,11 +366,11 @@ export function buildDashboardAgent(
     ? promptInfo(input.system)
     : {
         available: false,
-        reason: "该 Agent 不在当前目录的 Agent 列表中，无法读取它的角色定义与 System Prompt。",
+        reason: "该 Agent 不在团队视图中，无法读取它的角色定义与 System Prompt。",
       }
   const description = input.known
     ? input.description?.trim() || undefined
-    : "该 Agent 不在当前目录的 Agent 列表中；只能清除旧覆盖。"
+    : "该 Agent 不在团队视图中；只能清除旧覆盖。"
   const name = input.name?.trim() || input.id
   const searchText = [
     input.id,
@@ -501,7 +458,7 @@ export function buildDashboardGroups(
       : [
           {
             key: "unavailable" as const,
-            title: `已保存但当前不可用 · ${unavailable.length}`,
+            title: `已保存但不在团队视图 · ${unavailable.length}`,
             agents: unavailable,
           },
         ]),
@@ -526,7 +483,7 @@ export function filterDashboardGroups(
           group.key === "subagents"
             ? `SUBAGENTS · ${agents.length}`
             : group.key === "unavailable"
-              ? `已保存但当前不可用 · ${agents.length}`
+              ? `已保存但不在团队视图 · ${agents.length}`
               : group.title,
         agents,
       },
@@ -543,6 +500,3 @@ export function layoutFor(width: number, height: number): DashboardLayout {
     listWidth: width >= 112 ? 32 : 28,
   }
 }
-
-export const PROMPT_NOTE =
-  "只读：这是宿主当前生效的 Agent 定义中的 System Prompt。请求时宿主还会附加全局 instructions、工具说明与环境信息，插件无法读取完整拼装结果。"

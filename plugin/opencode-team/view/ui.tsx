@@ -27,21 +27,19 @@ export function providerTitleColor(theme: Theme) {
 }
 
 /**
- * 选中态分强弱：当前键盘焦点用宿主主操作色填充（与原生 Select model 一致），
- * 失焦但仍有选中的区域退回抬升表面，避免两个区域同时高饱和。
+ * 选中行统一使用抬升表面和强调色指示条，不再用整行主操作色填充；
+ * 当前操作区域由面板边框或标题表示，避免多个区域同时高饱和。
  */
-export function rowBackground(theme: Theme, selected: boolean, focused: boolean) {
-  if (!selected) return undefined
-  return focused ? theme.background.action.primary.focused : theme.background.raised.high
+export function rowBackground(theme: Theme, selected: boolean) {
+  return selected ? theme.background.raised.high : undefined
 }
 
-export function rowForeground(theme: Theme, selected: boolean, focused: boolean) {
-  return selected && focused ? theme.text.action.primary.focused : theme.text.base
+export function rowForeground(theme: Theme) {
+  return theme.text.base
 }
 
-export function rowSecondary(theme: Theme, selected: boolean, focused: boolean) {
-  if (selected) return focused ? theme.text.action.primary.focused : theme.text.base
-  return theme.text.muted
+export function rowSecondary(theme: Theme, selected: boolean) {
+  return selected ? theme.text.base : theme.text.muted
 }
 
 export function rowMarker(theme: Theme, selected: boolean) {

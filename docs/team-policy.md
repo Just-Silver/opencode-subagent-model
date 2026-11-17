@@ -61,7 +61,7 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
 
 - 只拦截工具 `subagent` 的有效对象输入，其他工具不受影响。
 - 从输入读取 `agent` 字符串，按 Agent ID 精确匹配；命中才覆盖 `model`，未命中保持输入原样。
-- 命中时无条件覆盖 `model`，无论原值缺省还是显式指定；新建、续接、前台和后台调用一致。
+- 命中时无条件覆盖 `model`，无论原值缺省还是显式指定；新建与续接调用一致。
 - 不修改主代理的会话模型。`/team` 与 RPC 也会拒绝为主代理写覆盖，并明确说明主代理由
   OpenCode 原生选择。原因：TUI 新会话始终写入 `session.model`，Agent 定义的 `model` 只在没有
   显式选择时兜底；`experimental.model.resolve` 又只能在同供应商内换模型，无法可靠地跨供应商覆盖。
@@ -91,7 +91,7 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
    Agent 也按“未配置即原生”处理。
 5. 写入 `team-legacy-migration` 后不再导入；迁移结果通过 RPC 返回给 TUI，提示用户移除旧包并重启。
 6. 旧插件在新插件之后才完成 setup 时，首次读取可能拿不到 RPC；迁移会在 `/team` 打开或下一次
-   策略读取时重试，成功后才固化标记。
+   命中覆盖的调用时重试，成功后才固化标记。
 
 限制：旧包已移除后才启动新插件时，旧值仍在 SQLite 的旧命名空间中，但官方插件 API 无法跨命名空间
 读取；本插件不直接访问数据库，因此不会自动导入。此时在 `/team` 重新选择即可。
@@ -104,7 +104,7 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
 [effective subagent model: provider/model#variant (forced by policy)]
 ```
 
-无变体时不拼 `#variant`。前台随完成结果返回，后台随启动确认立即返回。只改工具返回的 `content`，
+无变体时不拼 `#variant`。子代理启动确认返回时追加，续接调用同样处理。只改工具返回的 `content`，
 不改子代理自己的回答、结构化 `output` 或 `metadata`。未命中策略、其他工具及失败返回均不追加标记；
 清除前已派发的调用仍按本次记录告知。
 
@@ -117,9 +117,10 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
 全局 slash / 命令面板入口为 `/team`，打开 Agent Team Dashboard；完整界面契约、数据来源与
 键盘/尺寸行为见 [TUI Dashboard](./team-tui.md)。
 
-1. 左侧列出团队 Agent：Orchestrator、所有可见子代理，以及已保存但当前不可用的覆盖；
-   隐藏 Agent 和其他 primary 不展示。右侧展示角色说明、模型来源、Variant、权限摘要与只读
-   System Prompt。
+1. 左侧列出团队 Agent：Orchestrator、所有可见子代理，以及已保存但不在团队视图的覆盖；
+   隐藏 Agent 和其他 primary 不进入团队列表，但如果已有覆盖会出现在该分组，只能清除。
+   顶部搜索框常驻并默认聚焦，直接输入即过滤。右侧展示角色说明、模型来源、Variant、权限摘要与
+   只读 System Prompt。
 2. 模型状态区分：primary 无独立模型为“原生”，subagent 无独立模型为“继承”，团队覆盖或
    Agent 配置模型为“自定义”；详情标注来源是团队策略还是 Agent 配置。
 3. 选择子代理后打开内嵌模型配置：按 Provider 分组展示模型，搜索框默认聚焦、直接输入即过滤，
@@ -129,7 +130,7 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
 4. 主代理模型只读展示；策略与 RPC 都拒绝为主代理写覆盖。
 5. 检测到旧插件时提示迁移结果并要求移除旧插件，不打开可写配置。
 6. 宿主不能动态注册团队 Agent 时在面板内警告，但仍允许查看现有 Agent 并配置已存在的子代理。
-7. System Prompt 来自宿主当前生效的 `AgentInfo.system`，只读；缺失时明确说明，不伪造。
+7. System Prompt 来自宿主当前生效的 `AgentInfo.system`，在详情区完整只读展示；缺失时明确说明，不伪造。
 8. 权限摘要按最后命中规则去重，展示效果计数与关键限制；它是规则摘要，不是权限沙箱。
 
 标题与详情中的当前模型优先写可读名称；只有模型已不在目录中时才显示原引用和
@@ -170,10 +171,10 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
 ## 验证
 
 `node --test` 覆盖：按 Agent 精确覆盖、未命中保留原生、清除恢复、模型/变体校验、
-未知 Agent 与 primary 拒绝、跨实例共享、存储损坏/失败阻止调用、前后台与并发返回标记、旧插件冲突
+未知 Agent 与 primary 拒绝、跨实例共享、存储损坏/失败阻止调用、启动确认与并发返回标记、旧插件冲突
 （含 setup 顺序漏检后的动态发现）、一次性迁移、用户配置覆盖、团队权限策略、Dashboard 状态/搜索/
-尺寸模型，以及内嵌模型配置的 Provider 分组、直接输入字符判定、区域切换、过滤后选中项、
-语义色映射、Variant、一次性保存与失败提示。权限用例复刻宿主的最后命中、deny 优先于 saved allow、会话追加、
+尺寸模型，以及内嵌模型配置的 Provider 分组、区域切换、过滤后选中项、语义色映射、Variant、
+保存与失败提示。权限用例复刻宿主的最后命中、deny 优先于 saved allow、会话追加、
 工具可见性、`edit/write/patch` 共用动作和子会话取用规则，并验证插件只注入 QA/Reviewer 的
 `question` 拒绝、用户配置可覆盖。TUI 视觉、键盘与真实交互由用户手动验证，不提交临时渲染脚本；
 双入口 esbuild、`npm pack --dry-run`、`git diff --check` 作为回归验证。

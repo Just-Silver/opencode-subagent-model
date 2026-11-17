@@ -95,18 +95,20 @@ npm view @justsilver/opencode-team dist-tags versions --json
 
 首发后到 npm → 该包 → Settings → Trusted publishing 登记仓库、Workflow filename `release.yml`、
 Environment 留空，并允许 `npm publish`；新配置须在 2 天内完成一次成功发布，否则过期。
-GitHub 仓库改名尚未执行，`package.json` 的 homepage/repository/bugs 暂时仍指向现仓库；
-改名后再更新这些 URL 与 trusted publisher 的仓库名。
+GitHub 仓库已改名为 `Just-Silver/opencode-team`，`package.json` 的 homepage/repository/bugs
+已同步；登记 trusted publisher 时使用该仓库名。
 
 首发后必须核对实际 dist-tag，不能仅靠 `--tag next` 假定 `latest` 一定不存在。
 正式版只走手动 dispatch；不要复用已经发布或撤回的版本号。
 
-### 旧包弃用（尚未执行）
+### 旧包弃用（待新包发布并验证后）
 
-旧包 `@justsilver/opencode-subagent-model` 只制定方案，当前版本不发布或弃用：
+旧包 `@justsilver/opencode-subagent-model` 当前不执行 `npm deprecate`，避免把用户指向尚未
+发布的包。顺序如下：
 
-1. 等 `@justsilver/opencode-team` 正式版可安装并确认迁移说明；
-2. 执行 `npm deprecate @justsilver/opencode-subagent-model "Renamed to @justsilver/opencode-team; see migration guide"`；
+1. 先人工发布 `@justsilver/opencode-team`，并用 `opencode plugin add` 验证可安装；
+2. 确认迁移说明与新包可用后，先 `npm login`，再执行
+   `npm deprecate @justsilver/opencode-subagent-model "Renamed to @justsilver/opencode-team; see migration guide"`；
 3. 旧包保留可安装，不撤包，避免已锁版本的用户无法重装。
 
 发布后 npm 可能存在元数据与 tarball 的传播延迟；确认版本、标签和 tarball 都可取后再宣告可安装。

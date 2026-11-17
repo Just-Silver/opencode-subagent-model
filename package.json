@@ -5,13 +5,13 @@
   "description": "Zero-config multi-agent team for OpenCode V2: Orchestrator, QA, Reviewer, and per-agent subagent model/variant policy",
   "license": "MIT",
   "author": "Just-Silver",
-  "homepage": "https://github.com/Just-Silver/opencode-subagent-model#readme",
+  "homepage": "https://github.com/Just-Silver/opencode-team#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Just-Silver/opencode-subagent-model.git"
+    "url": "git+https://github.com/Just-Silver/opencode-team.git"
   },
   "bugs": {
-    "url": "https://github.com/Just-Silver/opencode-subagent-model/issues"
+    "url": "https://github.com/Just-Silver/opencode-team/issues"
   },
   "keywords": ["opencode", "opencode-plugin", "agent", "team", "orchestrator", "subagent", "model"],
   "main": "./plugin/opencode-team/index.ts",

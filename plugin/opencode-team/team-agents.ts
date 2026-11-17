@@ -1,0 +1,105 @@
+import { ORCHESTRATOR_PROMPT, QA_PROMPT, REVIEWER_PROMPT } from "./prompts.ts"
+
+export interface PermissionRule {
+  readonly action: string
+  readonly resource: string
+  readonly effect: "allow" | "deny" | "ask"
+}
+
+export interface TeamAgentDefinition {
+  readonly id: string
+  readonly name: string
+  readonly description: string
+  readonly mode: "primary" | "subagent"
+  readonly system: string
+  readonly permissions: readonly PermissionRule[]
+}
+
+/** Built-in agents the team reuses; also the fallback set for a legacy model import. */
+export const TEAM_SUBAGENT_IDS = ["general", "explore", "qa", "reviewer"] as const
+
+// Subagents must not ask the user directly; the primary Orchestrator owns user interaction.
+const QUESTION_DENY: readonly PermissionRule[] = [{ action: "question", resource: "*", effect: "deny" }]
+
+export const TEAM_AGENTS: readonly TeamAgentDefinition[] = [
+  {
+    id: "orchestrator",
+    name: "Orchestrator",
+    description:
+      "Primary team lead. Prefers orchestration, may execute simple tasks directly, coordinates concurrent writes and Git operations, and delivers the final outcome.",
+    mode: "primary",
+    system: ORCHESTRATOR_PROMPT,
+    permissions: [],
+  },
+  {
+    id: "qa",
+    name: "QA",
+    description:
+      "Independent acceptance owner. Designs, writes, and executes acceptance tests from the request and observed behavior, and does not adjust criteria to fit the implementation.",
+    mode: "subagent",
+    system: QA_PROMPT,
+    permissions: QUESTION_DENY,
+  },
+  {
+    id: "reviewer",
+    name: "Reviewer",
+    description:
+      "Independent reviewer. Reviews and reports findings by default; changes code only when explicitly authorized.",
+    mode: "subagent",
+    system: REVIEWER_PROMPT,
+    permissions: QUESTION_DENY,
+  },
+]
+
+export interface TeamAgentEditor {
+  get(id: string): { readonly id: string } | undefined
+  update(
+    id: string,
+    update: (agent: {
+      name: string
+      description?: string
+      mode: "primary" | "subagent" | "all"
+      system?: string
+      hidden: boolean
+      permissions: PermissionRule[]
+    }) => void,
+  ): void
+}
+
+export interface TeamAgentContext {
+  readonly agent?: {
+    transform(callback: (editor: TeamAgentEditor) => void): Promise<{ dispose(): Promise<void> }>
+  }
+}
+
+export interface TeamAgentRegistration {
+  readonly supported: boolean
+  readonly error?: string
+}
+
+export async function registerTeamAgents(ctx: TeamAgentContext): Promise<TeamAgentRegistration> {
+  const transform = ctx.agent?.transform
+  if (typeof transform !== "function") {
+    return { supported: false, error: "This host cannot register agents at runtime." }
+  }
+  try {
+    await transform((editor) => {
+      for (const definition of TEAM_AGENTS) {
+        editor.update(definition.id, (agent) => {
+          agent.name = definition.name
+          agent.description = definition.description
+          agent.mode = definition.mode
+          agent.system = definition.system
+          agent.hidden = false
+          agent.permissions.push(...definition.permissions)
+        })
+      }
+    })
+  } catch (error) {
+    return {
+      supported: false,
+      error: `Team agent registration failed: ${error instanceof Error ? error.message : String(error)}`,
+    }
+  }
+  return { supported: true }
+}

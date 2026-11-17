@@ -2,6 +2,9 @@
 
 # 子代理模型插件独立迁移计划
 
+> 历史说明：项目已于 2026-11-17 更名为 `opencode-team`。本文保留当时的迁移决策与验收记录，
+> 现行契约见[策略](./team-policy.md)与[团队 Agent](./team-agents.md)，不按现状回填本文。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to execute this approved inline migration. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 从 providers 迁出独立 npm 插件，保留已审查行为，旧包不再覆盖子代理。
@@ -11,7 +14,7 @@
 
 **Tech Stack:** TypeScript、Node ≥ 24 原生测试、OpenCode V2 插件 API，无运行时依赖。
 
-**Spec:** [策略契约](./subagent-model-policy.md)；执行授权来自本次会话中已确认的独立插件、npm 分发和“撤包后移动工作区开始迁移”。
+**Spec:** [策略契约](./team-policy.md)；执行授权来自本次会话中已确认的独立插件、npm 分发和“撤包后移动工作区开始迁移”。
 
 ## 全局约束
 

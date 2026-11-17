@@ -1,8 +1,8 @@
 {
-  "name": "@justsilver/opencode-subagent-model",
-  "version": "0.1.2",
+  "name": "@justsilver/opencode-team",
+  "version": "0.2.0",
   "type": "module",
-  "description": "Force a global model for OpenCode V2 subagents and report the effective model in tool results",
+  "description": "Zero-config multi-agent team for OpenCode V2: Orchestrator, QA, Reviewer, and per-agent subagent model/variant policy",
   "license": "MIT",
   "author": "Just-Silver",
   "homepage": "https://github.com/Just-Silver/opencode-subagent-model#readme",
@@ -13,15 +13,15 @@
   "bugs": {
     "url": "https://github.com/Just-Silver/opencode-subagent-model/issues"
   },
-  "keywords": ["opencode", "opencode-plugin", "subagent", "model"],
-  "main": "./plugin/opencode-subagent-model/index.ts",
+  "keywords": ["opencode", "opencode-plugin", "agent", "team", "orchestrator", "subagent", "model"],
+  "main": "./plugin/opencode-team/index.ts",
   "exports": {
-    ".": "./plugin/opencode-subagent-model/index.ts",
-    "./server": "./plugin/opencode-subagent-model/index.ts",
-    "./tui": "./plugin/opencode-subagent-model/tui.ts",
-    "./rpc": "./plugin/opencode-subagent-model/rpc.ts"
+    ".": "./plugin/opencode-team/index.ts",
+    "./server": "./plugin/opencode-team/index.ts",
+    "./tui": "./plugin/opencode-team/tui.ts",
+    "./rpc": "./plugin/opencode-team/rpc.ts"
   },
-  "files": ["plugin/**/*.ts", "!plugin/**/*.test.ts", "CHANGELOG.md"],
+  "files": ["plugin/**/*.ts", "plugin/**/*.tsx", "!plugin/**/*.test.ts", "CHANGELOG.md"],
   "publishConfig": {
     "access": "public",
     "tag": "next"
@@ -32,7 +32,12 @@
   "scripts": {
     "test": "node --test"
   },
+  "peerDependencies": {
+    "@opentui/core": ">=0.8.4",
+    "@opentui/solid": ">=0.8.4",
+    "solid-js": ">=1.9.12"
+  },
   "devDependencies": {
-    "@opencode/plugin": "^2.0.24"
+    "@opencode/plugin": "^2.3.0"
   }
 }

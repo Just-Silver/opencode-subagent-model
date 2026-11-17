@@ -1,55 +1,111 @@
-<!-- 职责：使用者的安装、命令、迁移与疑难解答；不写：内部实现、发版流程、项目现状。 -->
+<!-- 职责：使用者的安装、团队用法、按 Agent 模型配置、迁移与疑难解答；不写：内部实现、发版流程、完整设计契约。 -->
 
-# opencode-subagent-model
+# opencode-team
 
-给 OpenCode V2 的所有子代理统一指定模型，并在工具返回中告知主代理。
-可选择当前目录可用的任意聊天模型，不依赖任何供应商插件。
+给 OpenCode V2 提供零配置的多 Agent 团队：Orchestrator、QA、Reviewer 开箱即用，
+并可按 Agent 单独指定子代理模型与变体。可选择当前目录可用的任意聊天模型，不依赖供应商插件。
 
 ## 安装
 
 ```bash
-opencode plugin add @justsilver/opencode-subagent-model
+opencode plugin add @justsilver/opencode-team
 ```
 
-预发布版用 `@justsilver/opencode-subagent-model@next`。
+预发布版用 `@justsilver/opencode-team@next`。
 
-安装后**完全退出并重新启动** OpenCode，TUI 入口在启动时加载。
-
+安装后**完全退出并重新启动** OpenCode，server 与 TUI 入口都在启动时加载。
 也可以从本地源码目录加载：在 `plugins` 里给插件目录的绝对路径，
-例如 `{ "package": "<仓库>/plugin/opencode-subagent-model" }`。两种方式同一个插件 ID，不要同时启用。
+例如 `{ "package": "<仓库>/plugin/opencode-team" }`。两种方式同一个插件 ID，不要同时启用。
 
-## 使用
+## 团队 Agent
 
-在输入框输入 `/`，从补全菜单选择 `/subagent-model`，或在命令面板搜索「子代理统一模型」。
+安装后自动获得：
 
-- 选择聊天模型，再选择默认参数或变体；取消任一步都不会保存。
-- 「关闭强制覆盖」恢复 OpenCode 原有模型选择规则。
+- `Orchestrator`（主代理）：按需调度、协调子代理并完成最终交付；可以直接执行任务。
+  它不会自动变成默认主代理，用 OpenCode 的 Agent 切换选择它，或在配置中设置
+  `default_agent: "orchestrator"`。
+- `QA`（子代理）：独立设计、编写及执行验收测试并报告证据；不迎合实现修改验收标准。
+- `Reviewer`（子代理）：默认只审查和报告；除非明确授权，否则不修改代码。
+- 继续复用内置 `general`、`explore`；不重复实现已有能力，也不修改它们的权限。
+
+插件只给 QA / Reviewer 注入一条 `question * deny`，防止子代理直接向用户提问：
+
+- Orchestrator 不追加权限规则。
+- QA / Reviewer 除 `question` 外，其余权限继承 OpenCode 默认与用户配置。
+- General、Explore 保持内置定义，插件不修改。
+- 职责边界由 System Prompt 约束：
+  - Orchestrator 优先编排，简单任务可直接执行，并协调并发写入与共享文件冲突。
+  - QA 独立设计、编写及执行验收测试，不迎合实现修改验收标准。
+  - Reviewer 默认只审查和报告；确需直接修复时，明确区分审查结果与后续修改。
+- 这不是权限沙箱；需要硬限制时请在 `opencode.json` 配置对应 Agent 权限。
+- 项目/全局 Agent 配置在插件之后合并，可以收紧或放开权限。
+
+详细职责、合并顺序与客观验证要求见[团队 Agent](docs/team-agents.md#system-prompt-职责)。
+
+## Agent Team Dashboard
+
+在输入框输入 `/`，选择 `/team`，或在命令面板搜索「Agent 团队与模型」。
+
+- 左侧列出团队 Agent：Orchestrator、General、Explore、QA、Reviewer，以及自定义子代理；
+  每行显示当前模型和状态（原生 / 继承 / 自定义）。
+- 右侧显示角色说明、当前模型、权限摘要和只读 System Prompt。
+- 方向键或 `j`/`k` 选择；`Enter` 打开模型配置；`P` 查看完整提示词；
+  `R` 清除团队覆盖；`/` 搜索；`Esc` 返回或关闭。
+- 模型配置在同一视图内按 Provider 分组展示模型，支持搜索、Variant 和 `Tab` 焦点切换；
+  `Enter` 一次性保存，`Esc` 取消且不修改已有配置。
+- 窄终端会自动切换为列表/详情或模型/Variant 单栏，低高度使用紧凑行。
+
+模型规则：
+
+- 设置按 Agent ID 精确匹配；未配置的 Agent 继续使用 OpenCode 原生选择。
+- 主代理（包括 Orchestrator）的模型始终由 OpenCode 会话选择，面板只读展示。
+- 在模型配置中按 `R` 会删除团队覆盖；如果该 Agent 在 `opencode.json` 配置了模型，
+  则回到该 Agent 配置。
 - 设置在同一 OpenCode 服务端数据库下全局共享，重启后保留；保存后对后续调用生效。
-- 启用时，无论主代理是否显式指定其他模型，前台、后台及续接调用都会被覆盖。
+- 命中策略时，无论主代理是否显式指定其他模型，前台、后台及续接调用都会被覆盖。
 - 模型不可用或存储读取失败时明确报错，不静默回退。
-- 工具成功返回末尾附本次强制模型标记；前台随完成结果、后台随启动确认返回。
-  格式与边界见[策略契约](docs/subagent-model-policy.md#主代理知情边界)。
+- 子代理成功返回末尾附本次模型标记；前台随完成结果、后台随启动确认返回。
+  格式与边界见[策略契约](docs/team-policy.md#主代理知情边界)。
 
-保存策略本身无需重启；已派发请求不会被新设置追溯修改。
+System Prompt 与权限：
 
-## 从 providers 迁移
+- 提示词来自宿主当前生效的 Agent 定义，只读；General 等没有独立 System Prompt 的 Agent
+  会明确显示“宿主未提供”，插件不会生成或补全内容。
+- 面板展示的是 Agent 定义中的 System Prompt，不是请求时由宿主追加全局 instructions、
+  工具说明与环境信息后的完整拼装结果。
+- 权限摘要按宿主合并后的规则计算，只是效果摘要，不代表权限沙箱；需要硬限制时请在
+  `opencode.json` 配置对应 Agent 权限。
 
-本功能曾内置在 `opencode-providers` 中，现已独立。两者不会共享设置，需要重新选择一次模型：
+当前版本不提供 Agent 创建、删除、重命名或 Prompt 编辑。
 
-1. 记录原先选择的模型及变体。
-2. 停用 providers 里的旧覆盖（升级到不再包含该功能的版本，或移除旧插件）。
-3. 安装本插件并完全重启 OpenCode，避免旧命令和新命令并存。
-4. 用 `/subagent-model` 重新选择一次模型。
+## 从旧版插件迁移
 
-本插件使用独立的存储命名空间，不读取、改写或删除旧设置。
+旧包为 `@justsilver/opencode-subagent-model`，使用独立的存储命名空间与全局模型策略。
+新插件无法直接读取旧命名空间，因此需要旧插件仍在加载时完成交接：
+
+1. 保留旧包配置，先安装 `@justsilver/opencode-team` 并完全重启 OpenCode。
+2. 打开一次 `/team`。若检测到旧插件，会提示冲突与迁移结果；若提示迁移失败，确认旧插件已加载后重新打开一次。
+3. 旧全局模型会导入到当前 location 中所有非主代理 Agent（含自定义子代理）；旧设置为空时只记录迁移结果。
+   其他项目独有的自定义 Agent 不在当前列表中，需要在那个项目打开 `/team` 重新选择。
+4. 移除旧包配置，完全重启 OpenCode。
+5. 打开 `/team` 调整个别 Agent 的模型或恢复原生选择。
+
+如果先移除了旧包再启动新插件，旧值仍在旧命名空间中，但官方插件 API 无法跨命名空间读取；
+本插件不会直接访问数据库。此时直接在 `/team` 重新选择即可。
+
+旧 npm 包的弃用（`npm deprecate`）尚未执行；计划在正式版确认后补一条迁移提示，
+不在本次改动中发布或弃用任何包。
 
 ## 疑难解答
 
 | 现象 | 处理 |
 |---|---|
-| 找不到命令 | 确认插件已加载，且安装后完全重启过 OpenCode |
-| 提示功能不可用 | 当前宿主缺少所需工具钩子，或钩子注册失败；不会假装保存成功 |
-| 当前模型不可用 | 切到可用模型或关闭覆盖；不会静默换成其他模型 |
-| 命令重复或覆盖冲突 | 检查是否同时启用了旧 providers 版本、本地目录和 npm 两份 |
+| 找不到 `/team` | 确认插件已加载，且安装后完全重启过 OpenCode |
+| 提示旧插件冲突 | 按迁移步骤先打开 `/team` 完成导入，再移除旧包并重启 |
+| 提示不能动态注册团队 Agent | 宿主版本过旧；升级 OpenCode。已存在的子代理仍可配置模型 |
+| 提示功能不可用 | 当前宿主缺少工具钩子，或钩子注册失败；不会假装保存成功 |
+| 当前模型不可用 | 切到可用模型或恢复原生选择；不会静默换成其他模型 |
+| 命令重复或覆盖冲突 | 检查是否同时启用了旧包、本地目录和 npm 两份 |
 
-开发与发布见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+开发与发布见 [CONTRIBUTING.md](CONTRIBUTING.md)，设计契约见[策略](docs/team-policy.md)与
+[团队 Agent](docs/team-agents.md)。

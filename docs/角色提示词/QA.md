@@ -38,3 +38,11 @@
 - 明确验收结论、实际执行结果、发现的缺陷和未覆盖风险。
 - 问题报告应包含足够的证据与复现信息。
 - 区分已确认缺陷、合理推断和待验证问题，不输出无依据的结论。
+
+---
+
+## 工具描述
+
+`plugin/opencode-team/team-agents.ts` 中的 `description`。模型选择代理时只看到这段，看不到上面的提示词全文，因此边界要求必须在这里同步，而不是只写在提示词里。
+
+> Independent quality assurance agent. Designs and executes acceptance and regression tests against requirements and contracts, investigates failures, and independently verifies fixes. Production code changes require explicit authorization.

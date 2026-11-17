@@ -24,8 +24,10 @@ opencode plugin add @justsilver/opencode-team
 - `Orchestrator`（主代理）：按需调度、协调子代理并完成最终交付；可以直接执行任务。
   它不会自动变成默认主代理，用 OpenCode 的 Agent 切换选择它，或在配置中设置
   `default_agent: "orchestrator"`。
-- `QA`（子代理）：独立设计、编写及执行验收测试并报告证据；不迎合实现修改验收标准。
-- `Reviewer`（子代理）：默认只审查和报告；除非明确授权，否则不修改代码。
+- `QA`（子代理）：独立设计、编写及执行验收测试并报告证据；不迎合实现修改验收标准；
+  修改生产代码需明确授权。
+- `Reviewer`（子代理）：默认只审查和报告；可做针对性验证但不替代 QA 验收；
+  修改生产代码需明确授权。
 - 继续复用内置 `general`、`explore`；不重复实现已有能力，也不修改它们的权限。
 
 插件只给 QA / Reviewer 注入一条 `question * deny`，防止子代理直接向用户提问：
@@ -34,9 +36,12 @@ opencode plugin add @justsilver/opencode-team
 - QA / Reviewer 除 `question` 外，其余权限继承 OpenCode 默认与用户配置。
 - General、Explore 保持内置定义，插件不修改。
 - 职责边界由 System Prompt 约束：
-  - Orchestrator 优先编排，简单任务可直接执行，并协调并发写入与共享文件冲突。
-  - QA 独立设计、编写及执行验收测试，不迎合实现修改验收标准。
-  - Reviewer 默认只审查和报告；确需直接修复时，明确区分审查结果与后续修改。
+  - Orchestrator 优先编排，简单任务可直接执行，协调并发写入与共享文件冲突，
+    整合子代理结论并对最终交付负责。
+  - QA 独立设计、编写及执行验收测试，不迎合实现修改验收标准；生产代码修复交由实现代理，
+    自身修复后不得自验。
+  - Reviewer 默认只审查和报告；可做针对性验证但不替代 QA 的独立验收；
+    确需直接修复时，明确区分审查结果与后续修改。
 - 这不是权限沙箱；需要硬限制时请在 `opencode.json` 配置对应 Agent 权限。
 - 项目/全局 Agent 配置在插件之后合并，可以收紧或放开权限。
 

@@ -26,7 +26,7 @@ export const TEAM_AGENTS: readonly TeamAgentDefinition[] = [
     id: "orchestrator",
     name: "Orchestrator",
     description:
-      "Primary team lead. Prefers orchestration, may execute simple tasks directly, coordinates concurrent writes and Git operations, and delivers the final outcome.",
+      "Primary team lead responsible for end-to-end delivery. Dynamically delegates or executes tasks, coordinates parallel work and Git operations, reconciles agent findings, and owns final decisions and verification.",
     mode: "primary",
     system: ORCHESTRATOR_PROMPT,
     permissions: [],
@@ -35,7 +35,7 @@ export const TEAM_AGENTS: readonly TeamAgentDefinition[] = [
     id: "qa",
     name: "QA",
     description:
-      "Independent acceptance owner. Designs, writes, and executes acceptance tests from the request and observed behavior, and does not adjust criteria to fit the implementation.",
+      "Independent quality assurance agent. Designs and executes acceptance and regression tests against requirements and contracts, investigates failures, and independently verifies fixes. Production code changes require explicit authorization.",
     mode: "subagent",
     system: QA_PROMPT,
     permissions: QUESTION_DENY,
@@ -44,7 +44,7 @@ export const TEAM_AGENTS: readonly TeamAgentDefinition[] = [
     id: "reviewer",
     name: "Reviewer",
     description:
-      "Independent reviewer. Reviews and reports findings by default; changes code only when explicitly authorized.",
+      "Independent code reviewer. Primarily reviews source code for correctness, architecture, and risks, using targeted verification when needed. Reports evidence-based findings without replacing QA acceptance testing. Production code changes require explicit authorization.",
     mode: "subagent",
     system: REVIEWER_PROMPT,
     permissions: QUESTION_DENY,

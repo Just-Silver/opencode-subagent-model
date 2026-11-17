@@ -425,7 +425,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
           warning={props.warning}
         />
 
-        <box paddingTop={1} flexShrink={0}>
+        <box paddingTop={1} paddingBottom={1} paddingLeft={1} paddingRight={1} flexShrink={0}>
           <SearchField
             theme={theme()}
             query={query()}

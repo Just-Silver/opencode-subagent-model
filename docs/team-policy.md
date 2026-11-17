@@ -122,9 +122,10 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
    System Prompt。
 2. 模型状态区分：primary 无独立模型为“原生”，subagent 无独立模型为“继承”，团队覆盖或
    Agent 配置模型为“自定义”；详情标注来源是团队策略还是 Agent 配置。
-3. 选择子代理后打开内嵌模型配置：按 Provider 分组展示模型，支持搜索与 Variant，`Enter`
-   一次性保存；`Esc` 取消不修改；`R` 恢复原生/清除团队覆盖。保存经 RPC 写到服务端，
-   成功或失败以 toast 和面板状态告知；RPC 显式携带当前 location。
+3. 选择子代理后打开内嵌模型配置：按 Provider 分组展示模型，搜索框默认聚焦、直接输入即过滤，
+   左右方向键切换区域与 Variant，`Enter` 先选思考等级再保存；`ESC` 返回不保存；`Ctrl+R` 恢复原生/
+   清除团队覆盖（先在 Modal 内确认）。保存经 RPC 写到服务端，成功或失败都在当前 Modal 的
+   状态栏反馈，不再使用宿主 Toast；RPC 显式携带当前 location。
 4. 主代理模型只读展示；策略与 RPC 都拒绝为主代理写覆盖。
 5. 检测到旧插件时提示迁移结果并要求移除旧插件，不打开可写配置。
 6. 宿主不能动态注册团队 Agent 时在面板内警告，但仍允许查看现有 Agent 并配置已存在的子代理。
@@ -171,8 +172,9 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
 `node --test` 覆盖：按 Agent 精确覆盖、未命中保留原生、清除恢复、模型/变体校验、
 未知 Agent 与 primary 拒绝、跨实例共享、存储损坏/失败阻止调用、前后台与并发返回标记、旧插件冲突
 （含 setup 顺序漏检后的动态发现）、一次性迁移、用户配置覆盖、团队权限策略、Dashboard 状态/搜索/
-尺寸模型，以及内嵌模型配置的 Provider 分组、Variant、一次性保存与失败提示。权限用例复刻宿主的最后命中、deny 优先于 saved allow、会话追加、
+尺寸模型，以及内嵌模型配置的 Provider 分组、直接输入字符判定、区域切换、过滤后选中项、
+语义色映射、Variant、一次性保存与失败提示。权限用例复刻宿主的最后命中、deny 优先于 saved allow、会话追加、
 工具可见性、`edit/write/patch` 共用动作和子会话取用规则，并验证插件只注入 QA/Reviewer 的
-`question` 拒绝、用户配置可覆盖。TUI 渲染、键盘与小终端布局按 [TUI Dashboard](./team-tui.md#验证) 的临时渲染测试
-单独验证；双入口 esbuild、`npm pack --dry-run`、`git diff --check` 作为回归验证。
+`question` 拒绝、用户配置可覆盖。TUI 视觉、键盘与真实交互由用户手动验证，不提交临时渲染脚本；
+双入口 esbuild、`npm pack --dry-run`、`git diff --check` 作为回归验证。
 未进行真实供应商请求或旧 SQLite 数据操作。

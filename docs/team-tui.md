@@ -64,7 +64,7 @@ Build/Plan 等其他 primary 不进入列表；隐藏 Agent 不展示。模型�
   不生成、不补全、不伪造内容。
 - `AgentInfo.system` 只是 Agent 定义中的 System Prompt；请求时宿主还会附加全局
   instructions、工具说明与环境信息，插件无法读取完整拼装结果。界面会明确说明这一点。
-- `P` 打开完整 Prompt 页，可滚动；`P` 或 `Esc` 返回 Dashboard。
+- `P` 打开完整 Prompt 页，可滚动；`P` 或 `ESC` 返回 Dashboard。
 
 ## 权限摘要
 
@@ -75,6 +75,29 @@ Build/Plan 等其他 primary 不进入列表；隐藏 Agent 不展示。模型�
 - 文案明确这是规则效果摘要，**不是权限沙箱**；Shell 仍可能写文件，需要硬限制时由用户配置
   Agent 权限。
 
+## 配色与视觉层级
+
+界面只使用宿主 `ResolvedTheme` 的语义 token，不硬编码 RGB，深色与浅色主题都随宿主解析：
+
+- 主要信息（Agent 名称、模型名称、当前配置）使用 `text.base`；当前项加粗。
+- 次要信息（模型 ID、来源、角色描述）使用 `text.muted`。
+- 辅助信息（来源、说明、快捷键标签）也使用 `text.muted`；`text.faint` 只留给分隔点、
+  未选中行的占位标记等不承载信息的位置。
+- Provider 分组标题使用宿主强调色阶 `theme.hue.accent[200]`（默认主题为紫色）并加粗，
+  与模型名称形成层级；右侧数量使用次要文字色。
+- 选中态分强弱：当前键盘焦点区域用 `background.action.primary.focused` 主操作色填充，
+  失焦但仍有选中的区域退回 `background.raised.high`；两者都带左侧指示条。
+- 状态语义固定：原生 / 继承用次要文字色，自定义用主题强调色；权限拒绝用错误色、
+  询问用警告色，允许规则保持中性以减少干扰。Badge 背景由
+  `theme.decrease(theme.background.base)` 从主题推导，不在组件里维护另一套颜色。
+- 当前模型卡片使用抬升表面和强调色左边条；权限详情整体降低视觉权重。
+- Dashboard 左侧只保留 Agent 名称与状态，仅自定义模型追加当前模型行，避免与“继承”状态重复；
+  模型行按词换行完整显示 Provider、模型与 Variant，不截断关键信息。
+- 内容超过面板高度时，详情、Agent 列表、模型列表和 Variant 面板右侧显示常驻主题滚动条，
+  使用 `theme.scrollbar` 颜色并绝对定位，不因滚动条出现而改变内容宽度。
+- 标题、分组标题、分隔线、选中态在 Dashboard、Provider 分组、模型列表和 Variant 面板
+  共用 `view/ui.tsx` 的定义；界面快捷键提示统一写作 `ESC`。
+
 ## 键盘与布局
 
 Dashboard：
@@ -84,50 +107,74 @@ Dashboard：
 | `↑↓` / `j k` | 选择 Agent；Prompt 页滚动 |
 | `Home` / `End` | 首个/最后一个 Agent；Prompt 页到顶/到底 |
 | `PgUp` / `PgDn` | 滚动详情或 Prompt |
-| `Enter` | 打开内嵌模型配置；单栏模式下先进入详情 |
+| `Enter` | 打开内嵌模型配置；单栏模式下先进入详情；确认条出现时执行确认 |
 | `P` | 完整 System Prompt / 返回 |
-| `R` | 清除团队覆盖；无覆盖时只提示 |
+| `R` | 清除团队覆盖；无覆盖时只提示；执行前在 Modal 内确认 |
 | `/` | 进入搜索 |
-| `Esc` | 退出搜索 / 返回列表 / 关闭面板 |
+| `ESC` | 取消确认 / 退出搜索 / 返回列表 / 关闭面板 |
 
 模型配置：
 
 | 按键 | 行为 |
 |---|---|
-| `↑↓` / `j k` | 移动当前焦点：模型列表或 Variant 列表 |
-| `Tab` / `Shift+Tab` | 在模型、Variant、搜索之间切换焦点 |
-| `Enter` | 一次性保存当前模型与 Variant；失败时留在配置页 |
-| `/` | 聚焦搜索并过滤模型名称、Provider、引用 |
-| `R` | 恢复原生 / 清除团队覆盖 |
+| `↑↓` | 移动当前焦点：模型列表或 Variant 列表 |
+| `←` / `→` | 在模型列表与 Variant 面板之间切换焦点 |
+| `Tab` / `Shift+Tab` | 与左右方向键等效的区域切换 |
+| 直接输入 | 搜索框默认聚焦，输入即过滤模型、Provider 与引用 |
+| `Enter` | 模型列表中有 Variant 时先进入思考等级面板；无 Variant 或已在思考等级面板时保存；确认条出现时执行确认 |
+| `Ctrl+R` | 恢复原生 / 清除团队覆盖；先在 Modal 内确认 |
 | `PgUp` / `PgDn` | 滚动模型或 Variant |
-| `Esc` | 退出搜索 / 返回 Dashboard，不保存 |
+| `ESC` | 取消确认 / 返回 Dashboard，不保存 |
 
-搜索只在搜索态挂载输入框，其余时间不占用字符快捷键。搜索匹配名称、角色、状态、来源和模型名；
-过滤后子代理计数随之更新。
+搜索框与 OpenCode `/model` 一样默认聚焦，不需要先按 `/`；Backspace、Delete、粘贴和中文输入法
+都由宿主输入组件处理。`j`、`k`、`r`、`/` 会作为普通字符输入查询，不再触发导航或恢复。
+过滤实时更新 Provider 分组与数量，空分组不显示；没有结果时显示明确提示，清空查询后恢复完整列表。
+搜索变化后选中项落到第一个可见模型，没有可见模型时不保留旧选中项。
 
 - 宽度 `< 90`：Dashboard 单栏，列表与详情切换；模型配置也只显示当前焦点面板。
 - 高度 `< 20` 或宽度 `< 100`：Agent/模型行使用紧凑布局。
-- 宽度 `< 50`：只保留核心快捷键；模型配置隐藏常驻搜索栏，按 `/` 展开。
+- 宽度 `< 50`：只保留核心快捷键；模型配置搜索栏始终显示，支持直接输入。
 - 尺寸变化通过 `useTerminalDimensions()` 响应式重算。
 
 ## 内嵌模型配置
 
 模型配置是 Dashboard 内的视图，不替换弹窗、不重新打开 Dashboard：
 
-- 顶部显示 Agent、当前模型与来源；搜索栏按 Provider 分组过滤模型。
-- 左侧模型列表显示模型名称与完整引用，当前生效模型有“当前”标记。
+- 顶部显示 Agent、当前模型与来源；搜索输入框默认聚焦，输入即按 Provider 分组过滤模型。
+- 在模型列表按 `Enter`：模型有 Variant 时先切到右侧思考等级面板，选中等级后再按 `Enter` 保存；
+  没有 Variant 时直接保存。保存成功后停留在当前配置页并更新“当前”标记。
+- Provider 标题使用主题强调色并加粗，右侧显示该组过滤后的模型数；组之间用低对比度分隔线，
+  标题随列表滚动，模型行比标题低一级缩进。
+- 左侧模型列表显示模型名称与完整引用，当前生效模型有“当前”标记；焦点区域强高亮，
+  失焦区域保留弱高亮，两行文字都保持可读对比度。
 - 右侧 Variant 面板显示所选模型；Variant 直接来自 `ModelInfo.variants`，
-  没有 Variant 的模型明确提示“该模型不提供 Variant”，保存时只写基础引用。
-- 模型和 Variant 只维护本地待保存状态；`Enter` 才调用一次 `setAgentModel`，
-  `Esc` 取消不修改已有配置。
-- 保存失败时保留在配置页并显示“保存失败，可重试”；成功后才返回 Dashboard 并更新模型显示。
-- 重复打开会以当前覆盖重新初始化；窄终端通过 `Tab` 在模型/Variant 单栏之间切换。
+  没有 Variant 的模型明确提示“该模型不提供 Variant”，保存时只写基础引用；
+  无 Variant 时焦点不会停留在该面板。
+- 切换模型会立即刷新 Variant 列表；模型和 Variant 只维护本地待保存状态，
+  保存时才调用一次 `setAgentModel`，取消或保存失败不改变已有配置。
+- 保存失败时保留在配置页，并在 Modal 内状态栏显示错误详情；保存成功后同样停留在配置页，
+  立即更新当前模型与状态，不自动返回 Dashboard，由 `ESC` 返回。
+- 重复打开会以当前覆盖重新初始化；窄终端通过左右方向键或 `Tab` 在单栏之间切换。
+
+## Modal 内反馈
+
+`/team` 打开期间，操作状态统一由 Dashboard 的 Solid 状态管理，并同时传给模型配置视图：
+
+- 状态栏作为独立布局行放在快捷键栏上方，不覆盖 Agent/模型列表、搜索框、Variant 或底栏。
+- 成功、普通状态使用紧凑状态栏并自动收起；警告停留更久；错误常驻并换行展示完整内容，
+  直到下一次操作或关闭 Modal。
+- 保存成功、RPC 失败、恢复原生、无覆盖提示、主代理/失效 Agent 提示、搜索无结果都在当前
+  Modal 内反馈，不再调用可能被弹窗层遮挡的宿主 Toast。
+- 模型目录或 Agent 同步失败仍由面板顶部的告警条说明；阻止打开（没有 Modal）时才使用宿主 Toast。
+- 清除团队覆盖前在 Modal 内显示确认条：`Enter` 确认、`ESC` 取消；确认期间其他导航、搜索、
+  鼠标选择和恢复操作暂停，避免误触。
+- 异步保存/恢复完成前会显示处理中状态；关闭 Modal 后通过销毁标记丢弃后续状态更新，
+  不向已卸载组件写入反馈或关闭动作。
 
 ## 验证
 
 ```bash
 node --test
-bun test --conditions=browser --preload @opentui/solid/preload ./<临时渲染测试>.test.ts
 npx --yes esbuild plugin/opencode-team/tui.ts --bundle --platform=node --format=esm \
   --jsx=automatic --jsx-import-source=@opentui/solid \
   --external:@opencode/plugin/tui --external:@opentui/core \
@@ -136,8 +183,5 @@ npm pack --dry-run
 git diff --check
 ```
 
-渲染冒烟测试覆盖 120×32、80×24、40×12，Dashboard 选择/搜索/Prompt/单栏，以及模型配置的
-Provider 分组、搜索、Tab 焦点、Variant 选择、一次性保存、取消、恢复原生和保存失败。
-临时渲染测试用于本地验证，不提交；TUI 代码更新后必须完全重启 OpenCode 才能加载新入口。
-真实 TUI 冒烟验证过 `/team` 打开 Dashboard、鼠标选择 Agent、`Enter` 打开模型配置、
-`Tab` 切换 Variant 焦点、`Esc` 返回且不保存。
+自动验证只覆盖 `node --test`、构建与打包；TUI 视觉、终端尺寸和真实交互由用户手动验证，
+临时渲染脚本和截图不入库。TUI 代码更新后必须完全重启 OpenCode 才能加载新入口。

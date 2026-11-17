@@ -95,6 +95,41 @@ export const SOURCE_LABELS: Readonly<Record<ModelSource, string>> = {
   none: "无独立模型",
 }
 
+export type FeedbackTone = "info" | "success" | "warning" | "error"
+
+export interface Feedback {
+  readonly tone: FeedbackTone
+  readonly message: string
+}
+
+/** 错误保留到下一次操作或被关闭，其余状态自动收起，避免状态栏长期占用内容高度。 */
+export function feedbackDismissMs(tone: FeedbackTone): number {
+  if (tone === "error") return 0
+  if (tone === "warning") return 6000
+  return 4000
+}
+
+export type Tone = "neutral" | "accent" | "success" | "warning" | "error" | "info"
+
+export function statusTone(status: ModelStatus): Tone {
+  return status === "custom" ? "accent" : "neutral"
+}
+
+/** 允许规则数量多，保持中性；只有拒绝与询问用语义色，避免权限区抢走模型信息的注意力。 */
+export function effectTone(effect: PermissionEffect): Tone {
+  if (effect === "deny") return "error"
+  if (effect === "ask") return "warning"
+  return "neutral"
+}
+
+export type ConfigRegion = "models" | "variants"
+
+/** 无 Variant 的模型没有可操作的第二栏，切换区域时始终留在模型列表。 */
+export function nextRegion(region: ConfigRegion, hasVariants: boolean): ConfigRegion {
+  if (!hasVariants) return "models"
+  return region === "models" ? "variants" : "models"
+}
+
 const PREFERRED_SUBAGENTS = ["general", "explore", "qa", "reviewer"] as const
 const PROMPT_UNAVAILABLE =
   "宿主未为该 Agent 提供独立 System Prompt。运行时由宿主拼装全局指令、工具说明与环境信息，插件无法读取这部分内容。"
@@ -188,6 +223,16 @@ export function variantsFor(model: ModelInfo | undefined): readonly string[] {
     result.push(variant.id)
   }
   return result
+}
+
+/** 搜索改变列表后，选中项必须落在可见模型上；没有可见模型时返回 undefined。 */
+export function firstVisibleRef(
+  models: readonly ModelInfo[],
+  current: string,
+): string | undefined {
+  if (models.some((model) => modelRefOf(model) === current)) return current
+  const first = models[0]
+  return first === undefined ? undefined : modelRefOf(first)
 }
 
 export function buildModelRef(baseRef: string, variant: string | undefined): string {

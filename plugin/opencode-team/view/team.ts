@@ -2,7 +2,11 @@ import type { AgentInfo, ModelInfo, ProviderInfo } from "@opencode/client"
 import type { Plugin } from "@opencode/plugin/tui"
 
 import { teamRpc, type TeamPolicySummary } from "../rpc.ts"
-import type { DashboardAgent, DashboardAgentInput } from "./model.ts"
+import type {
+  DashboardAgent,
+  DashboardAgentInput,
+  FeedbackTone,
+} from "./model.ts"
 
 type Context = Plugin.Context
 type Location = ReturnType<typeof currentLocation>
@@ -23,7 +27,9 @@ export type LoadTeamDashboardResult =
 
 export interface ModelSelectionResult {
   readonly saved: boolean
-  readonly model: string | null
+  readonly tone: FeedbackTone
+  readonly message: string
+  readonly model?: string | null
   readonly models?: Readonly<Record<string, string>>
 }
 
@@ -89,15 +95,21 @@ export async function saveAgentModel(
   location: Location,
   agent: DashboardAgent,
   model: string | null,
-): Promise<ModelSelectionResult | undefined> {
+): Promise<ModelSelectionResult> {
   if (model !== null) {
     if (!agent.known) {
-      toastInfo(ctx, "该 Agent 当前目录不可用，只能清除旧覆盖。")
-      return undefined
+      return {
+        saved: false,
+        tone: "warning",
+        message: "该 Agent 当前目录不可用，只能清除旧覆盖。",
+      }
     }
     if (agent.mode === "primary") {
-      toastInfo(ctx, "主代理模型由 OpenCode 会话选择，团队策略只覆盖子代理。")
-      return undefined
+      return {
+        saved: false,
+        tone: "info",
+        message: "主代理模型由 OpenCode 会话选择，团队策略只覆盖子代理。",
+      }
     }
   }
   return saveModel(ctx, location, agent.id, agent.name, model, agent.hostModel)
@@ -107,10 +119,13 @@ export async function restoreAgentModel(
   ctx: Context,
   location: Location,
   agent: DashboardAgent,
-): Promise<ModelSelectionResult | undefined> {
+): Promise<ModelSelectionResult> {
   if (!agent.canRestore) {
-    toastInfo(ctx, `${agent.name} 没有团队模型覆盖，无需恢复。`)
-    return undefined
+    return {
+      saved: false,
+      tone: "info",
+      message: `${agent.name} 没有团队模型覆盖，无需恢复。`,
+    }
   }
   return saveAgentModel(ctx, location, agent, null)
 }
@@ -206,29 +221,35 @@ async function saveModel(
   agentName: string,
   model: string | null,
   hostModel: string | undefined,
-): Promise<ModelSelectionResult | undefined> {
+): Promise<ModelSelectionResult> {
   let result: TeamPolicySummary
   try {
     result = (await ctx.client.rpc(teamRpc).setAgentModel({ agentID, model }, { location })) as TeamPolicySummary
   } catch (error) {
-    toastError(ctx, `保存 Agent 模型失败：${message(error)}`)
-    return undefined
+    return {
+      saved: false,
+      tone: "error",
+      message: `保存 Agent 模型失败：${message(error)}`,
+      model,
+    }
   }
   if (!result.ok) {
-    toastError(ctx, `保存 Agent 模型失败：${summarize(result)}`)
-    return undefined
+    return {
+      saved: false,
+      tone: "error",
+      message: `保存 Agent 模型失败：${summarize(result)}`,
+      model,
+    }
   }
-  ctx.ui.toast.show({
-    variant: "success",
+  return {
+    saved: true,
+    tone: "success",
     message:
       model === null
         ? hostModel === undefined
           ? `已恢复 ${agentName} 的 OpenCode 原生模型选择`
           : `已清除 ${agentName} 的团队覆盖，回到 Agent 配置的 ${hostModel}`
         : `${agentName} 的子代理模型已设为 ${result.models?.[agentID] ?? model}`,
-  })
-  return {
-    saved: true,
     model,
     ...(result.models === undefined ? {} : { models: result.models }),
   }
@@ -236,14 +257,6 @@ async function saveModel(
 
 function summarize(result: TeamPolicySummary): string {
   return (result.errors ?? []).join("; ") || "未知错误"
-}
-
-function toastError(ctx: Context, message: string): void {
-  ctx.ui.toast.show({ variant: "error", message })
-}
-
-function toastInfo(ctx: Context, message: string): void {
-  ctx.ui.toast.show({ variant: "info", message })
 }
 
 function message(error: unknown): string {

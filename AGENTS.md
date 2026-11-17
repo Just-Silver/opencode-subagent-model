@@ -32,6 +32,8 @@ npm 包名 `@justsilver/opencode-team`。
 - 测试只测本次业务行为，外部边界才用假件；纯迁移复用已有用例，不为类型结构、默认值或框架行为补测试。
 - 注释只解释不显然的约束；迁移、来源、版本和审查记录写进文档。
 - npm 包与本地目录两种加载方式不可同时启用；TUI 代码更新后须完全重启客户端。
+- **冒烟由用户执行**：agent 不启动真实 OpenCode 实例、不注入按键/鼠标、不截图，也不编写或
+  提交临时渲染测试、探针和冒烟脚本；交付前只跑自动验证命令，真实 TUI、终端尺寸与视觉状态由用户验收。
 
 # 验证命令
 
@@ -43,6 +45,8 @@ npx --yes esbuild plugin/opencode-team/tui.ts --bundle --platform=node --format=
 npm pack --dry-run
 git diff --check
 ```
+
+以上命令只做自动验证。真实 TUI 冒烟、视觉检查和终端尺寸验证由用户执行，agent 不生成临时脚本或截图。
 
 # 文档地图
 

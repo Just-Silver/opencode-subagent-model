@@ -25,14 +25,6 @@ export async function configureTeam(ctx: Plugin.Context): Promise<void> {
   }
 
   const data = result.data
-  if (!data.agentsSupported) {
-    ctx.ui.toast.show({
-      variant: "warning",
-      message:
-        "当前宿主不能动态注册团队 Agent；Orchestrator、QA、Reviewer 不可用，但现有子代理的模型覆盖仍可配置。",
-    })
-  }
-
   let overrides: Readonly<Record<string, string>> = data.overrides
   let closed = false
   const session: DashboardSession = {
@@ -59,17 +51,14 @@ export async function configureTeam(ctx: Plugin.Context): Promise<void> {
           clearDialog={() => ctx.ui.dialog.clear()}
           saveModel={async (agent: DashboardAgent, model: string | null) => {
             const saved = await saveAgentModel(ctx, location, agent, model)
-            if (saved === undefined) return undefined
-            overrides = saved.models ?? overrides
-            return overrides
+            if (saved.saved && saved.models !== undefined) overrides = saved.models
+            return saved
           }}
           restoreModel={async (agent: DashboardAgent) => {
             const restored = await restoreAgentModel(ctx, location, agent)
-            if (restored?.models === undefined) return undefined
-            overrides = restored.models
-            return restored.models
+            if (restored.saved && restored.models !== undefined) overrides = restored.models
+            return restored
           }}
-          notify={(message) => ctx.ui.toast.show({ variant: "info", message })}
           close={() => {
             closed = true
           }}

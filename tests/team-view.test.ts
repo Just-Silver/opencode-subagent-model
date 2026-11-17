@@ -11,13 +11,18 @@ import {
   buildDashboardGroups,
   buildModelRef,
   currentModelSelection,
+  effectTone,
+  feedbackDismissMs,
   filterDashboardGroups,
+  firstVisibleRef,
   layoutFor,
   modelConfigLayoutFor,
   modelGroups,
+  nextRegion,
   promptInfo,
   resolveModel,
   roleLabel,
+  statusTone,
   summarizePermissions,
   variantsFor,
   type DashboardAgent,
@@ -566,12 +571,14 @@ test("缺少 location 时使用 data.location.default()", async () => {
 test("保存无变体模型后写入完整引用", async () => {
   const h = await harness({})
   const result = await saveAgentModel(h.ctx, CURRENT_LOCATION, dashboardAgent("qa"), "provider-b/beta")
-  assert.equal(result?.saved, true)
+  assert.equal(result.saved, true)
+  assert.equal(result.tone, "success")
+  assert.match(result.message, /qa.*provider-b\/beta/i)
   assert.deepEqual(h.storage.map.get(POLICY_KEY), {
     version: 1,
     agents: { qa: "provider-b/beta" },
   })
-  assert.ok(h.calls.toast.some((toast) => toast.variant === "success"))
+  assert.equal(h.calls.toast.length, 0)
   assert.ok(h.calls.setLocations.every((location) => location === CURRENT_LOCATION))
 })
 
@@ -600,9 +607,10 @@ test("清除团队覆盖后回到 Agent 配置", async () => {
   )[0]!.agents[0]!
   const h = await harness({ policy: { reviewer: "provider-a/alpha#high" } })
   const result = await saveAgentModel(h.ctx, CURRENT_LOCATION, configured, null)
-  assert.equal(result?.saved, true)
+  assert.equal(result.saved, true)
+  assert.equal(result.tone, "success")
+  assert.match(result.message, /Agent 配置/)
   assert.deepEqual(h.storage.map.get(POLICY_KEY), { version: 1, agents: {} })
-  assert.ok(h.calls.toast.some((toast) => /Agent 配置/.test(toast.message)))
 })
 
 test("主代理与失效 Agent 拒绝写入新模型，但仍允许清除旧覆盖", async () => {
@@ -613,32 +621,37 @@ test("主代理与失效 Agent 拒绝写入新模型，但仍允许清除旧覆�
     dashboardAgent("orchestrator"),
     "provider-a/alpha",
   )
-  assert.equal(primaryResult, undefined)
+  assert.equal(primaryResult.saved, false)
+  assert.equal(primaryResult.tone, "info")
+  assert.match(primaryResult.message, /主代理/)
   assert.equal(primary.calls.setLocations.length, 0)
-  assert.ok(primary.calls.toast.some((toast) => /主代理/.test(toast.message)))
+  assert.equal(primary.calls.toast.length, 0)
 
   const missing = buildDashboardGroups(inputs(), { removed: "provider-a/alpha" }, [ALPHA], PROVIDERS)
     .find((group) => group.key === "unavailable")!
     .agents[0]!
   const unknown = await harness({ policy: { removed: "provider-a/alpha" } })
   const unknownResult = await saveAgentModel(unknown.ctx, CURRENT_LOCATION, missing, "provider-b/beta")
-  assert.equal(unknownResult, undefined)
-  assert.ok(unknown.calls.toast.some((toast) => /当前目录不可用/.test(toast.message)))
+  assert.equal(unknownResult.saved, false)
+  assert.equal(unknownResult.tone, "warning")
+  assert.match(unknownResult.message, /当前目录不可用/)
+  assert.equal(unknown.calls.toast.length, 0)
   assert.deepEqual(unknown.storage.map.get(POLICY_KEY), { version: 1, agents: { removed: "provider-a/alpha" } })
 
   const cleared = await saveAgentModel(unknown.ctx, CURRENT_LOCATION, missing, null)
-  assert.equal(cleared?.saved, true)
+  assert.equal(cleared.saved, true)
   assert.deepEqual(unknown.storage.map.get(POLICY_KEY), { version: 1, agents: {} })
 })
 
-test("保存失败时不提示成功，旧设置保持不变", async () => {
+test("保存失败时返回错误反馈，旧设置保持不变", async () => {
   const storage = fakeStorage({ [POLICY_KEY]: { version: 1, agents: { general: "provider-a/alpha#high" } } })
   storage.failSet = true
   const h = await harness({ storage })
   const result = await saveAgentModel(h.ctx, CURRENT_LOCATION, dashboardAgent("qa"), "provider-a/alpha")
-  assert.equal(result, undefined)
-  assert.equal(h.calls.toast.some((toast) => toast.variant === "success"), false)
-  assert.ok(h.calls.toast.some((toast) => toast.variant === "error" && /保存/.test(toast.message)))
+  assert.equal(result.saved, false)
+  assert.equal(result.tone, "error")
+  assert.match(result.message, /保存 Agent 模型失败/)
+  assert.equal(h.calls.toast.length, 0)
   assert.deepEqual(storage.map.get(POLICY_KEY), {
     version: 1,
     agents: { general: "provider-a/alpha#high" },
@@ -714,19 +727,22 @@ test("恢复模型覆盖而不经过选择框", async () => {
   })
   const agent = dashboardAgent("qa", { qa: "provider-a/alpha#high" })
   const result = await restoreAgentModel(h.ctx, CURRENT_LOCATION, agent)
-  assert.equal(result?.saved, true)
+  assert.equal(result.saved, true)
+  assert.equal(result.tone, "success")
   assert.deepEqual(h.storage.map.get(POLICY_KEY), { version: 1, agents: {} })
   assert.deepEqual(h.calls.setLocations, [CURRENT_LOCATION])
-  assert.ok(h.calls.toast.some((toast) => toast.variant === "success"))
+  assert.equal(h.calls.toast.length, 0)
 })
 
-test("没有团队覆盖时恢复操作只提示，不调用 RPC", async () => {
+test("没有团队覆盖时恢复操作只返回提示，不调用 RPC", async () => {
   const h = await harness({ policy: { general: "provider-a/alpha" } })
   const agent = dashboardAgent("qa")
   const result = await restoreAgentModel(h.ctx, CURRENT_LOCATION, agent)
-  assert.equal(result, undefined)
+  assert.equal(result.saved, false)
+  assert.equal(result.tone, "info")
+  assert.match(result.message, /没有团队模型覆盖/)
   assert.equal(h.calls.setLocations.length, 0)
-  assert.ok(h.calls.toast.some((toast) => /没有团队模型覆盖/.test(toast.message)))
+  assert.equal(h.calls.toast.length, 0)
 })
 
 test("清除覆盖后面板重新计算为原生或 Agent 配置", () => {
@@ -743,4 +759,33 @@ test("清除覆盖后面板重新计算为原生或 Agent 配置", () => {
   )[0]!.agents[0]!
   assert.equal(configured.status, "custom")
   assert.equal(configured.sourceLabel, "Agent 配置")
+})
+
+test("区域切换在无 Variant 时停留在模型列表", () => {
+  assert.equal(nextRegion("models", true), "variants")
+  assert.equal(nextRegion("variants", true), "models")
+  assert.equal(nextRegion("models", false), "models")
+  assert.equal(nextRegion("variants", false), "models")
+})
+
+test("状态与权限语义色保持克制：自定义、拒绝、询问突出，原生继承与允许中性", () => {
+  assert.equal(statusTone("custom"), "accent")
+  assert.equal(statusTone("native"), "neutral")
+  assert.equal(statusTone("inherit"), "neutral")
+  assert.equal(effectTone("deny"), "error")
+  assert.equal(effectTone("ask"), "warning")
+  assert.equal(effectTone("allow"), "neutral")
+})
+
+test("Modal 内反馈停留时间：错误常驻，警告次之，普通状态自动收起", () => {
+  assert.equal(feedbackDismissMs("error"), 0)
+  assert.ok(feedbackDismissMs("warning") > feedbackDismissMs("success"))
+  assert.ok(feedbackDismissMs("success") > 0)
+  assert.equal(feedbackDismissMs("success"), feedbackDismissMs("info"))
+})
+
+test("搜索过滤后选中项落到可见模型，无结果时不保留不可见选中项", () => {
+  assert.equal(firstVisibleRef([ALPHA, BETA], "provider-b/beta"), "provider-b/beta")
+  assert.equal(firstVisibleRef([ALPHA], "provider-b/beta"), "provider-a/alpha")
+  assert.equal(firstVisibleRef([], "provider-b/beta"), undefined)
 })

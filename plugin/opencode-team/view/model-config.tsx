@@ -19,18 +19,40 @@ import {
 
 import {
   buildModelRef,
+  firstVisibleRef,
   modelConfigLayoutFor,
   modelGroups,
   modelRefOf,
+  nextRegion,
   parseModelRef,
   resolveModel,
   roleLabel,
   variantsFor,
+  type ConfigRegion,
   type DashboardAgent,
+  type Feedback,
 } from "./model.ts"
-import { Badge, Hints, type Hint, type KeymapLayer, type Theme } from "./ui.tsx"
+import type { ModelSelectionResult } from "./team.ts"
+import {
+  Badge,
+  ConfirmBar,
+  Divider,
+  FeedbackBar,
+  Hints,
+  providerTitleColor,
+  rowBackground,
+  rowForeground,
+  rowMarker,
+  rowSecondary,
+  scrollbarOptions,
+  selectedRowAccent,
+  statusTone,
+  type Hint,
+  type KeymapLayer,
+  type Theme,
+} from "./ui.tsx"
 
-type Focus = "models" | "variants" | "search"
+type Focus = ConfigRegion
 
 interface VariantOption {
   readonly id?: string
@@ -45,10 +67,11 @@ export interface ModelConfigProps {
   readonly modelError?: string
   readonly theme: Theme
   readonly layer: (factory: () => KeymapLayer) => void
+  readonly feedback?: Feedback
   readonly onClose: () => void
-  readonly onSave: (model: string) => Promise<boolean>
-  readonly onRestore: () => Promise<boolean>
-  readonly notify: (message: string) => void
+  readonly onSave: (model: string) => Promise<ModelSelectionResult>
+  readonly onRestore: () => Promise<ModelSelectionResult>
+  readonly notify: (feedback: Feedback) => void
 }
 
 export function ModelConfigView(props: ModelConfigProps) {
@@ -68,12 +91,13 @@ export function ModelConfigView(props: ModelConfigProps) {
   })
 
   const initialGroups = modelGroups(props.models, props.providers, "")
-  const firstModel = initialGroups[0]?.models[0]
+  const initialVisible = initialGroups.flatMap((group) => group.models)
+  const firstModel = initialVisible[0]
   const initialCurrent = current()
   const initialModel =
     initialCurrent === undefined
       ? firstModel
-      : (resolveModel(props.models, initialCurrent.baseRef) ?? firstModel)
+      : (initialVisible.find((model) => modelRefOf(model) === initialCurrent.baseRef) ?? firstModel)
   const initialVariants = variantsFor(initialModel)
   const initialVariant =
     initialCurrent?.baseRef === (initialModel === undefined ? "" : modelRefOf(initialModel)) &&
@@ -93,10 +117,15 @@ export function ModelConfigView(props: ModelConfigProps) {
   const [focus, setFocus] = createSignal<Focus>("models")
   const [saving, setSaving] = createSignal(false)
   const [saveFailed, setSaveFailed] = createSignal(false)
+  const [pendingRestore, setPendingRestore] = createSignal(false)
+  let disposed = false
 
   const groups = createMemo(() => modelGroups(props.models, props.providers, query()))
   const flatModels = createMemo(() => groups().flatMap((group) => group.models))
-  const selectedModel = createMemo(() => resolveModel(props.models, selectedRef()))
+  // 选中项必须仍在过滤后的列表里；搜索无结果时不能继续对旧模型执行保存。
+  const selectedModel = createMemo(() =>
+    flatModels().find((model) => modelRefOf(model) === selectedRef()),
+  )
   const variants = createMemo(() => variantsFor(selectedModel()))
   const variantRows = createMemo<VariantOption[]>(() => [
     { label: "默认" },
@@ -119,10 +148,8 @@ export function ModelConfigView(props: ModelConfigProps) {
 
   createEffect(() => {
     const list = flatModels()
-    if (list.length === 0) return
-    if (!list.some((model) => modelRefOf(model) === selectedRef())) {
-      setSelectedRef(modelRefOf(list[0]!))
-    }
+    const next = firstVisibleRef(list, selectedRef())
+    if (next !== undefined && next !== selectedRef()) setSelectedRef(next)
   })
 
   createEffect(
@@ -146,25 +173,31 @@ export function ModelConfigView(props: ModelConfigProps) {
     ),
   )
 
-  createEffect(
-    on(focus, (value) => {
-      if (value === "search") {
-        if (focusTimer !== undefined) clearTimeout(focusTimer)
-        focusTimer = setTimeout(() => {
-          if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.focus()
-        }, 1)
-      } else {
-        if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.blur()
-      }
-    }),
-  )
+  createEffect(() => {
+    // 当前模型没有 Variant 时，不把焦点留在无法操作的第二栏。
+    if (focus() === "variants" && variants().length === 0) setFocus("models")
+  })
 
   createEffect(on(selectedRef, (ref) => ensureModelVisible(ref)))
+  createEffect(on(query, () => ensureModelVisible(selectedRef())))
   createEffect(on(variantCursor, (index) => ensureVariantVisible(index)))
   onCleanup(() => {
+    disposed = true
     if (focusTimer !== undefined) clearTimeout(focusTimer)
     if (scrollTimer !== undefined) clearTimeout(scrollTimer)
   })
+
+  /** 搜索框始终保持焦点，输入即过滤，与 /model 一致；确认恢复时临时失焦。 */
+  function focusSearchInput(): void {
+    if (searchInput === undefined || searchInput.isDestroyed) return
+    searchInput.focus()
+    searchInput.cursorOffset = searchInput.value.length
+  }
+
+  function scheduleFocusSearch(): void {
+    if (focusTimer !== undefined) clearTimeout(focusTimer)
+    focusTimer = setTimeout(focusSearchInput, 1)
+  }
 
   function ensureModelVisible(ref: string): void {
     ensureVisible(modelScroll, modelNodes.get(ref))
@@ -187,16 +220,16 @@ export function ModelConfigView(props: ModelConfigProps) {
     }, 0)
   }
 
-  function cycleFocus(delta: number): void {
-    if (focus() === "variants" && variants().length === 0) {
-      setFocus("models")
-      return
-    }
-    const order: Focus[] =
-      variants().length > 0 ? ["models", "variants", "search"] : ["models", "search"]
-    const index = order.indexOf(focus())
-    const next = order[(index < 0 ? 0 : index + delta + order.length) % order.length]!
-    setFocus(next)
+  function cycleRegion(): void {
+    setFocus(nextRegion(focus(), variants().length > 0))
+  }
+
+  function focusModels(): void {
+    setFocus("models")
+  }
+
+  function focusVariants(): void {
+    if (variants().length > 0) setFocus("variants")
   }
 
   function moveModel(delta: number): void {
@@ -250,49 +283,104 @@ export function ModelConfigView(props: ModelConfigProps) {
     if (scroll !== undefined && !scroll.isDestroyed) scroll.scrollBy(delta * 10)
   }
 
+  function enter(): void {
+    if (pendingRestore()) {
+      void restore()
+      return
+    }
+    // 有 Variant 时，先在模型列表按 Enter 进入思考等级面板，确认等级后再保存。
+    if (focus() === "models" && variants().length > 0) {
+      setFocus("variants")
+      return
+    }
+    void save()
+  }
+
   async function save(): Promise<void> {
-    if (saving()) return
+    if (saving() || pendingRestore()) return
     const model = selectedModel()
     if (model === undefined) {
-      props.notify("请选择一个模型。")
+      props.notify({
+        tone: "warning",
+        message: query().trim() !== "" ? "没有匹配的模型，无法保存。" : "请选择一个模型。",
+      })
       return
     }
     setSaving(true)
     setSaveFailed(false)
+    props.notify({ tone: "info", message: "正在保存模型配置…" })
+    if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.blur()
     try {
-      const saved = await props.onSave(buildModelRef(selectedRef(), variant()))
+      const result = await props.onSave(buildModelRef(selectedRef(), variant()))
+      if (disposed) return
       setSaving(false)
-      if (saved) props.onClose()
-      else setSaveFailed(true)
-    } catch {
+      if (result.saved) {
+        setSaveFailed(false)
+        scheduleFocusSearch()
+      } else {
+        setSaveFailed(true)
+        scheduleFocusSearch()
+      }
+    } catch (error) {
+      if (disposed) return
       setSaving(false)
       setSaveFailed(true)
+      scheduleFocusSearch()
+      props.notify({
+        tone: "error",
+        message: `保存模型失败：${error instanceof Error ? error.message : String(error)}`,
+      })
     }
+  }
+
+  function requestRestore(): void {
+    if (saving() || pendingRestore()) return
+    if (props.currentOverride === undefined) {
+      props.notify({
+        tone: "info",
+        message: `${props.agent.name} 没有团队模型覆盖，无需恢复。`,
+      })
+      return
+    }
+    setSaveFailed(false)
+    setPendingRestore(true)
+    if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.blur()
   }
 
   async function restore(): Promise<void> {
     if (saving()) return
+    setPendingRestore(false)
     setSaving(true)
     setSaveFailed(false)
+    props.notify({ tone: "info", message: "正在恢复原生模型选择…" })
     try {
-      const restored = await props.onRestore()
+      const result = await props.onRestore()
+      if (disposed) return
       setSaving(false)
-      if (restored) props.onClose()
-    } catch {
+      if (result.saved) {
+        setSaveFailed(false)
+        scheduleFocusSearch()
+      } else {
+        setSaveFailed(true)
+        scheduleFocusSearch()
+      }
+    } catch (error) {
+      if (disposed) return
       setSaving(false)
       setSaveFailed(true)
+      scheduleFocusSearch()
+      props.notify({
+        tone: "error",
+        message: `恢复原生模型失败：${error instanceof Error ? error.message : String(error)}`,
+      })
     }
   }
 
   function escape(): void {
     if (saving()) return
-    if (focus() === "search") {
-      if (query().trim() !== "") {
-        setQuery("")
-        setFocus("models")
-        return
-      }
-      setFocus("models")
+    if (pendingRestore()) {
+      setPendingRestore(false)
+      scheduleFocusSearch()
       return
     }
     props.onClose()
@@ -305,15 +393,7 @@ export function ModelConfigView(props: ModelConfigProps) {
       {
         id: "opencode-team.model.up",
         bind: "up",
-        run: () => {
-          if (focus() === "variants") moveVariant(-1)
-          else moveModel(-1)
-        },
-      },
-      {
-        id: "opencode-team.model.up.k",
-        bind: "k",
-        enabled: () => focus() !== "search",
+        enabled: () => !pendingRestore(),
         run: () => {
           if (focus() === "variants") moveVariant(-1)
           else moveModel(-1)
@@ -322,15 +402,7 @@ export function ModelConfigView(props: ModelConfigProps) {
       {
         id: "opencode-team.model.down",
         bind: "down",
-        run: () => {
-          if (focus() === "variants") moveVariant(1)
-          else moveModel(1)
-        },
-      },
-      {
-        id: "opencode-team.model.down.j",
-        bind: "j",
-        enabled: () => focus() !== "search",
+        enabled: () => !pendingRestore(),
         run: () => {
           if (focus() === "variants") moveVariant(1)
           else moveModel(1)
@@ -339,48 +411,60 @@ export function ModelConfigView(props: ModelConfigProps) {
       {
         id: "opencode-team.model.tab",
         bind: "tab",
-        run: () => cycleFocus(1),
+        enabled: () => !pendingRestore(),
+        run: () => cycleRegion(),
       },
       {
         id: "opencode-team.model.shift_tab",
         bind: "shift+tab",
-        run: () => cycleFocus(-1),
+        enabled: () => !pendingRestore(),
+        run: () => cycleRegion(),
+      },
+      {
+        id: "opencode-team.model.left",
+        bind: "left",
+        enabled: () => !pendingRestore(),
+        run: focusModels,
+      },
+      {
+        id: "opencode-team.model.right",
+        bind: "right",
+        enabled: () => !pendingRestore(),
+        run: focusVariants,
       },
       {
         id: "opencode-team.model.enter",
         bind: "enter",
-        run: () => void save(),
-      },
-      {
-        id: "opencode-team.model.search",
-        bind: "slash",
-        enabled: () => focus() !== "search",
-        run: () => setFocus("search"),
+        run: enter,
       },
       {
         id: "opencode-team.model.restore",
-        bind: "r",
-        enabled: () => focus() !== "search",
-        run: () => void restore(),
+        bind: "ctrl+r",
+        enabled: () => !pendingRestore(),
+        run: requestRestore,
       },
       {
         id: "opencode-team.model.home",
         bind: "home",
+        enabled: () => !pendingRestore(),
         run: first,
       },
       {
         id: "opencode-team.model.end",
         bind: "end",
+        enabled: () => !pendingRestore(),
         run: last,
       },
       {
         id: "opencode-team.model.page_up",
         bind: "pageup",
+        enabled: () => !pendingRestore(),
         run: () => page(-1),
       },
       {
         id: "opencode-team.model.page_down",
         bind: "pagedown",
+        enabled: () => !pendingRestore(),
         run: () => page(1),
       },
       {
@@ -392,7 +476,6 @@ export function ModelConfigView(props: ModelConfigProps) {
   }))
 
   const split = () => layout().split
-  const showSearch = () => !layout().minimal || focus() === "search"
   const showModels = () => split() || focus() !== "variants"
   const showVariants = () => split() || focus() === "variants"
 
@@ -403,33 +486,36 @@ export function ModelConfigView(props: ModelConfigProps) {
           <text fg={theme().text.base} attributes={TextAttributes.BOLD}>
             Agent Team
           </text>
-          <text fg={theme().text.faint}>›</text>
+          <text fg={theme().text.muted}>›</text>
           <text fg={theme().text.base}>模型配置</text>
         </box>
-        <text fg={theme().text.muted}>ESC 返回</text>
+        <text fg={theme().text.muted}>
+          {pendingRestore() ? "ESC 取消" : "ESC 返回"}
+        </text>
       </box>
 
       <box paddingTop={1} flexShrink={0}>
         <AgentCard theme={theme()} agent={props.agent} compact={layout().compact} />
       </box>
 
-      <Show when={showSearch()}>
-        <box paddingTop={1} flexShrink={0}>
-          <SearchBox
-            theme={theme()}
-            query={query()}
-            focused={focus() === "search"}
-            onFocus={() => setFocus("search")}
-            onInput={(value) => {
-              setQuery(value)
-              if (focus() !== "search") setFocus("search")
-            }}
-            inputRef={(value) => {
-              searchInput = value
-            }}
-          />
-        </box>
-      </Show>
+      <box paddingTop={1} flexShrink={0}>
+        <SearchBox
+          theme={theme()}
+          query={query()}
+          focused={!pendingRestore()}
+          onFocus={() => {
+            if (!pendingRestore()) focusSearchInput()
+          }}
+          onInput={(value) => {
+            setQuery(value)
+            if (focus() === "variants") setFocus("models")
+          }}
+          inputRef={(value) => {
+            searchInput = value
+            scheduleFocusSearch()
+          }}
+        />
+      </box>
 
       <Show when={props.modelError !== undefined}>
         <box paddingTop={1} flexShrink={0}>
@@ -447,7 +533,9 @@ export function ModelConfigView(props: ModelConfigProps) {
             selectedRef={selectedRef()}
             currentBase={current()?.baseRef}
             compact={layout().compact}
+            focused={focus() === "models"}
             onSelect={(ref) => {
+              if (pendingRestore()) return
               setSelectedRef(ref)
               setFocus("models")
             }}
@@ -466,10 +554,12 @@ export function ModelConfigView(props: ModelConfigProps) {
             cursor={variantCursor()}
             pending={pendingLabel()}
             focused={focus() === "variants"}
+            empty={flatModels().length === 0}
             width={split() ? layout().variantWidth : undefined}
             saving={saving()}
             failed={saveFailed()}
             onSelect={(index) => {
+              if (pendingRestore()) return
               setVariantAt(index)
               setFocus("variants")
             }}
@@ -479,11 +569,27 @@ export function ModelConfigView(props: ModelConfigProps) {
         </Show>
       </box>
 
+      <Show when={pendingRestore()}>
+        <ConfirmBar
+          theme={theme()}
+          message={
+            props.agent.hostModel === undefined
+              ? `清除 ${props.agent.name} 的团队模型覆盖并恢复 OpenCode 原生选择？`
+              : `清除 ${props.agent.name} 的团队模型覆盖，回到 Agent 配置的 ${props.agent.hostModel}？`
+          }
+        />
+      </Show>
+      <Show when={props.feedback}>
+        {(value) => <FeedbackBar theme={theme()} feedback={value()} />}
+      </Show>
+
       <Foot
         theme={theme()}
         minimal={layout().minimal}
         focus={focus()}
         saving={saving()}
+        confirming={pendingRestore()}
+        hasVariants={variants().length > 0}
       />
     </box>
   )
@@ -496,7 +602,9 @@ function AgentCard(props: {
 }) {
   return (
     <box
-      backgroundColor={props.theme.background.raised.base}
+      backgroundColor={props.theme.background.raised.high}
+      border={["left"]}
+      borderColor={selectedRowAccent(props.theme)}
       paddingLeft={1}
       paddingRight={1}
       paddingTop={props.compact ? 0 : 1}
@@ -511,23 +619,14 @@ function AgentCard(props: {
             {props.agent.name}
           </text>
           <Show when={props.compact}>
-            <text
-              flexGrow={1}
-              fg={props.theme.text.muted}
-              overflow="hidden"
-              wrapMode="none"
-            >
-              当前：{props.agent.modelLabel}
+            <text flexGrow={1} overflow="hidden" wrapMode="none">
+              <span style={{ fg: props.theme.text.muted }}>当前：</span><span style={{ fg: props.theme.text.base }}>{props.agent.modelLabel}</span>
             </text>
           </Show>
         </box>
         <Show when={!props.compact}>
-          <text
-            fg={props.theme.text.muted}
-            overflow="hidden"
-            wrapMode="none"
-          >
-            当前模型：{props.agent.modelLabel} · {props.agent.sourceLabel}
+          <text overflow="hidden" wrapMode="none">
+            <span style={{ fg: props.theme.text.muted }}>当前模型：</span><span style={{ fg: props.theme.text.base }}>{props.agent.modelLabel}</span><span style={{ fg: props.theme.text.muted }}> · {props.agent.sourceLabel}</span>
           </text>
         </Show>
       </box>
@@ -536,7 +635,7 @@ function AgentCard(props: {
         <Badge
           theme={props.theme}
           text={props.agent.statusLabel}
-          tone={props.agent.status === "custom" ? "info" : "neutral"}
+          tone={statusTone(props.agent.status)}
         />
       </box>
     </box>
@@ -569,7 +668,7 @@ function SearchBox(props: {
         flexGrow={1}
         value={props.query}
         onInput={props.onInput}
-        placeholder="模型名称 / Provider / ID…"
+        placeholder="输入以搜索模型 / Provider / ID…"
         placeholderColor={props.theme.text.muted}
         focusedBackgroundColor={props.theme.background.formfield.focused}
         focusedTextColor={props.theme.text.formfield.focused}
@@ -586,6 +685,7 @@ function ModelList(props: {
   readonly selectedRef: string
   readonly currentBase?: string
   readonly compact: boolean
+  readonly focused: boolean
   readonly onSelect: (ref: string) => void
   readonly onRef: (ref: string, node: Renderable) => void
   readonly onScrollRef: (value: ScrollBoxRenderable) => void
@@ -603,23 +703,37 @@ function ModelList(props: {
         <scrollbox
           flexGrow={1}
           minHeight={0}
-          scrollbarOptions={{ visible: false }}
+          verticalScrollbarOptions={scrollbarOptions(props.theme)}
+          horizontalScrollbarOptions={{ visible: false }}
           ref={props.onScrollRef}
         >
           <For each={props.groups}>
             {(group, index) => (
               <box flexDirection="column">
+                <Show when={index() > 0}>
+                  <box paddingTop={1}>
+                    <Divider theme={props.theme} />
+                  </box>
+                </Show>
                 <box
                   flexDirection="row"
                   justifyContent="space-between"
-                  paddingTop={index() === 0 ? 0 : 1}
+                  gap={2}
                   paddingLeft={1}
                   paddingRight={1}
                 >
-                  <text fg={props.theme.text.faint} attributes={TextAttributes.BOLD}>
+                  <text
+                    flexGrow={1}
+                    overflow="hidden"
+                    wrapMode="none"
+                    fg={providerTitleColor(props.theme)}
+                    attributes={TextAttributes.BOLD}
+                  >
                     {group.providerName.toUpperCase()}
                   </text>
-                  <text fg={props.theme.text.faint}>{group.models.length}</text>
+                  <text flexShrink={0} fg={props.theme.text.muted}>
+                    {group.models.length}
+                  </text>
                 </box>
                 <For each={group.models}>
                   {(model) => {
@@ -629,34 +743,24 @@ function ModelList(props: {
                     return (
                       <box
                         flexDirection="column"
-                        paddingLeft={1}
+                        paddingLeft={2}
                         paddingRight={1}
-                        backgroundColor={
-                          active() ? props.theme.background.action.primary.focused : undefined
-                        }
+                        backgroundColor={rowBackground(props.theme, active(), props.focused)}
                         onMouseUp={() => props.onSelect(ref)}
                         ref={(node: Renderable) => props.onRef(ref, node)}
                       >
                         <box flexDirection="row" gap={1}>
                           <text
                             flexShrink={0}
-                            fg={
-                              active()
-                                ? props.theme.text.action.primary.focused
-                                : props.theme.text.faint
-                            }
+                            fg={rowMarker(props.theme, active())}
                           >
-                            {active() ? "›" : " "}
+                            {active() ? "▌" : " "}
                           </text>
                           <text
                             flexGrow={1}
                             overflow="hidden"
                             wrapMode="none"
-                            fg={
-                              active()
-                                ? props.theme.text.action.primary.focused
-                                : props.theme.text.base
-                            }
+                            fg={rowForeground(props.theme, active(), props.focused)}
                             attributes={active() ? TextAttributes.BOLD : undefined}
                           >
                             {model.name || model.id}
@@ -665,9 +769,9 @@ function ModelList(props: {
                             <text
                               flexShrink={0}
                               fg={
-                                active()
+                                active() && props.focused
                                   ? props.theme.text.action.primary.focused
-                                  : props.theme.text.feedback.info.base
+                                  : selectedRowAccent(props.theme)
                               }
                             >
                               当前
@@ -677,13 +781,8 @@ function ModelList(props: {
                         <Show when={!props.compact}>
                           <text
                             paddingLeft={2}
-                            overflow="hidden"
-                            wrapMode="none"
-                            fg={
-                              active()
-                                ? props.theme.text.action.secondary.focused
-                                : props.theme.text.muted
-                            }
+                            wrapMode="word"
+                            fg={rowSecondary(props.theme, active(), props.focused)}
                           >
                             {ref}
                           </text>
@@ -708,6 +807,7 @@ function VariantPane(props: {
   readonly cursor: number
   readonly pending: string
   readonly focused: boolean
+  readonly empty: boolean
   readonly width?: number
   readonly saving: boolean
   readonly failed: boolean
@@ -724,9 +824,9 @@ function VariantPane(props: {
       flexDirection="column"
       paddingLeft={1}
       paddingRight={1}
-      border={["top", "bottom", "left", "right"]}
+      border={["left"]}
       borderColor={
-        props.focused ? props.theme.text.action.primary.focused : props.theme.border.base
+        props.focused ? selectedRowAccent(props.theme) : props.theme.border.base
       }
       backgroundColor={props.theme.background.raised.base}
     >
@@ -734,23 +834,25 @@ function VariantPane(props: {
         when={props.model}
         fallback={
           <box paddingTop={1}>
-            <text fg={props.theme.text.muted}>从左侧选择模型。</text>
+            <text fg={props.theme.text.muted}>
+              {props.empty ? "没有匹配的模型。" : "从左侧选择模型。"}
+            </text>
           </box>
         }
       >
         {(model) => (
           <>
-            <box paddingTop={1} flexShrink={0}>
+            <box flexShrink={0}>
               <text fg={props.theme.text.base} attributes={TextAttributes.BOLD} wrapMode="word">
                 {model().name || model().id}
               </text>
-              <text fg={props.theme.text.faint} wrapMode="none" overflow="hidden">
+              <text fg={props.theme.text.muted} wrapMode="none" overflow="hidden">
                 {modelRefOf(model())}
               </text>
             </box>
-            <BoxDivider theme={props.theme} />
-            <text fg={props.theme.text.faint} attributes={TextAttributes.BOLD}>
-              推理等级 / Variant
+            <Divider theme={props.theme} />
+            <text fg={props.theme.text.muted} attributes={TextAttributes.BOLD}>
+              思考等级 / Variant
             </text>
             <Show
               when={hasChoices()}
@@ -763,7 +865,8 @@ function VariantPane(props: {
               <scrollbox
                 flexGrow={1}
                 minHeight={0}
-                scrollbarOptions={{ visible: false }}
+                verticalScrollbarOptions={scrollbarOptions(props.theme)}
+                horizontalScrollbarOptions={{ visible: false }}
                 ref={props.onScrollRef}
               >
                 <For each={props.variants}>
@@ -771,20 +874,25 @@ function VariantPane(props: {
                     const active = () => index() === props.cursor
                     return (
                       <box
+                        flexDirection="row"
+                        gap={1}
                         paddingLeft={1}
                         paddingRight={1}
-                        backgroundColor={
-                          active() ? props.theme.background.action.primary.focused : undefined
-                        }
+                        backgroundColor={rowBackground(props.theme, active(), props.focused)}
                         onMouseUp={() => props.onSelect(index())}
                         ref={(node: Renderable) => props.onRef(index(), node)}
                       >
                         <text
-                          fg={
-                            active()
-                              ? props.theme.text.action.primary.focused
-                              : props.theme.text.base
-                          }
+                          flexShrink={0}
+                          fg={rowMarker(props.theme, active())}
+                        >
+                          {active() ? "▌" : " "}
+                        </text>
+                        <text
+                          flexGrow={1}
+                          overflow="hidden"
+                          wrapMode="none"
+                          fg={rowForeground(props.theme, active(), props.focused)}
                           attributes={active() ? TextAttributes.BOLD : undefined}
                         >
                           {option.label}
@@ -795,15 +903,15 @@ function VariantPane(props: {
                 </For>
               </scrollbox>
             </Show>
-            <BoxDivider theme={props.theme} />
+            <Divider theme={props.theme} />
             <text fg={props.theme.text.muted} wrapMode="word">
               待保存 <span style={{ fg: props.theme.text.base }}>{props.pending}</span>
             </text>
             <Show when={props.saving}>
-              <text fg={props.theme.text.feedback.warning.base}>保存中…</text>
+              <text fg={props.theme.text.feedback.warning.base}>处理中…</text>
             </Show>
             <Show when={props.failed}>
-              <text fg={props.theme.text.feedback.error.base}>保存失败，可重试。</text>
+              <text fg={props.theme.text.feedback.error.base}>操作失败，可重试。</text>
             </Show>
           </>
         )}
@@ -812,49 +920,53 @@ function VariantPane(props: {
   )
 }
 
-function BoxDivider(props: { readonly theme: Theme }) {
-  return <box height={1} flexShrink={0} border={["bottom"]} borderColor={props.theme.border.base} />
-}
-
 function Foot(props: {
   readonly theme: Theme
   readonly minimal: boolean
   readonly focus: Focus
   readonly saving: boolean
+  readonly confirming: boolean
+  readonly hasVariants: boolean
 }) {
+  const enterLabel = () => {
+    if (props.saving) return "处理中…"
+    if (props.confirming) return "确认"
+    if (props.focus === "models" && props.hasVariants) return "思考等级"
+    return "保存"
+  }
   const hints = (): Hint[] => {
+    if (props.confirming) {
+      return [
+        { key: "Enter", label: "确认" },
+        { key: "ESC", label: "取消" },
+      ]
+    }
     if (props.minimal) {
       return [
         { key: "↑↓", label: "选择" },
-        { key: "Tab", label: "切换" },
-        { key: "Enter", label: props.saving ? "保存中…" : "保存" },
-        { key: "Esc", label: "返回" },
-      ]
-    }
-    if (props.focus === "search") {
-      return [
-        { key: "输入", label: "筛选" },
-        { key: "Tab", label: "切换" },
-        { key: "Enter", label: props.saving ? "保存中…" : "保存" },
-        { key: "Esc", label: "退出搜索" },
+        { key: "←→", label: "切换" },
+        { key: "输入", label: "搜索" },
+        { key: "Enter", label: enterLabel() },
+        { key: "ESC", label: "返回" },
       ]
     }
     if (props.focus === "variants") {
       return [
-        { key: "↑↓", label: "Variant" },
-        { key: "Tab", label: "切换" },
-        { key: "Enter", label: props.saving ? "保存中…" : "保存" },
-        { key: "R", label: "恢复原生" },
-        { key: "Esc", label: "返回" },
+        { key: "↑↓", label: "思考等级" },
+        { key: "←→", label: "切换" },
+        { key: "输入", label: "搜索" },
+        { key: "Enter", label: enterLabel() },
+        { key: "Ctrl+R", label: "恢复原生" },
+        { key: "ESC", label: "返回" },
       ]
     }
     return [
       { key: "↑↓", label: "模型" },
-      { key: "Tab", label: "切换" },
-      { key: "Enter", label: props.saving ? "保存中…" : "保存" },
-      { key: "/", label: "搜索" },
-      { key: "R", label: "恢复原生" },
-      { key: "Esc", label: "返回" },
+      { key: "←→", label: "切换" },
+      { key: "输入", label: "搜索" },
+      { key: "Enter", label: enterLabel() },
+      { key: "Ctrl+R", label: "恢复原生" },
+      { key: "ESC", label: "返回" },
     ]
   }
   return (

@@ -166,7 +166,7 @@ test("三份 System Prompt 明确职责边界", () => {
   assert.match(byID.get("orchestrator")!.system, /共享文件冲突/)
   assert.match(byID.get("qa")!.system, /独立质量保证代理/)
   assert.match(byID.get("qa")!.system, /验收标准/)
-  assert.match(byID.get("qa")!.system, /未执行的测试不得声称通过/)
+  assert.match(byID.get("qa")!.system, /不以自身修复后的测试结果代替独立验收/)
   assert.match(byID.get("reviewer")!.system, /独立代码审查代理/)
   assert.match(byID.get("reviewer")!.system, /默认保持审查独立性/)
   assert.match(byID.get("reviewer")!.system, /待验证/)

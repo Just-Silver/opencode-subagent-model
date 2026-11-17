@@ -6,6 +6,7 @@ import type { DashboardAgent } from "./model.ts"
 import {
   currentLocation,
   loadTeamDashboard,
+  refreshModels,
   restoreAgentModel,
   saveAgentModel,
 } from "./team.ts"
@@ -41,6 +42,7 @@ export async function configureTeam(ctx: Plugin.Context): Promise<void> {
           {...(data.warning === undefined ? {} : { warning: data.warning })}
           agentsSupported={data.agentsSupported}
           {...(data.agentsError === undefined ? {} : { agentsError: data.agentsError })}
+          refreshModels={() => refreshModels(ctx, location)}
           theme={ctx.theme}
           layer={(factory) => ctx.keymap.layer(factory)}
           clearDialog={() => ctx.ui.dialog.clear()}

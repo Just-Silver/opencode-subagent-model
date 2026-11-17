@@ -55,6 +55,10 @@ export interface TeamDashboardProps {
   readonly warning?: string
   readonly agentsSupported: boolean
   readonly agentsError?: string
+  readonly refreshModels: () => Promise<{
+    readonly models: readonly ModelInfo[]
+    readonly error?: string
+  }>
   readonly theme: Theme
   readonly layer: (factory: () => KeymapLayer) => void
   readonly clearDialog: () => void
@@ -72,6 +76,9 @@ export function TeamDashboard(props: TeamDashboardProps) {
   const layout = createMemo(() => layoutFor(dimensions().width, dimensions().height))
 
   const [overrides, setOverrides] = createSignal(props.overrides)
+  const [models, setModels] = createSignal(props.models)
+  const [modelError, setModelError] = createSignal(props.modelError)
+  const [refreshingModels, setRefreshingModels] = createSignal(false)
   const initialGroups = buildDashboardGroups(props.agents, props.overrides, props.models, props.providers)
   const initialRows = initialGroups.flatMap((group) => group.agents)
   const initialID = initialRows[0]?.id ?? ""
@@ -98,7 +105,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
     }, delay)
   }
 
-  const allGroups = () => buildDashboardGroups(props.agents, overrides(), props.models, props.providers)
+  const allGroups = () => buildDashboardGroups(props.agents, overrides(), models(), props.providers)
   const groups = () => filterDashboardGroups(allGroups(), query())
   const rows = () => groups().flatMap((group) => group.agents)
   const selected = () =>
@@ -209,6 +216,24 @@ export function TeamDashboard(props: TeamDashboardProps) {
         message: "主代理模型由 OpenCode 会话选择，团队策略只覆盖子代理。",
       })
       return
+    }
+    if (!refreshingModels() && (modelError() !== undefined || models().length === 0)) {
+      setRefreshingModels(true)
+      showFeedback({ tone: "info", message: "正在重新读取模型目录…" })
+      try {
+        const next = await props.refreshModels()
+        if (disposed) return
+        setModels(next.models)
+        setModelError(next.error)
+      } catch (error) {
+        if (disposed) return
+        showFeedback({
+          tone: "warning",
+          message: `模型目录刷新失败：${error instanceof Error ? error.message : String(error)}`,
+        })
+      } finally {
+        if (!disposed) setRefreshingModels(false)
+      }
     }
     setConfigAgentID(agent.id)
     setModelOpen(true)
@@ -350,10 +375,10 @@ export function TeamDashboard(props: TeamDashboardProps) {
             {(agent) => (
               <ModelConfigView
                 agent={agent()}
-                models={props.models}
+                models={models()}
                 providers={props.providers}
                 currentOverride={overrides()[agent().id]}
-                {...(props.modelError === undefined ? {} : { modelError: props.modelError })}
+                {...(modelError() === undefined ? {} : { modelError: modelError() })}
                 theme={theme()}
                 layer={props.layer}
                 feedback={feedback()}
@@ -396,7 +421,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
           theme={theme()}
           agentsSupported={props.agentsSupported}
           {...(props.agentsError === undefined ? {} : { agentsError: props.agentsError })}
-          modelError={props.modelError}
+          modelError={modelError()}
           warning={props.warning}
         />
 
@@ -519,7 +544,7 @@ function Banners(props: {
     }
     if (props.warning !== undefined) list.push(props.warning)
     if (props.modelError !== undefined) {
-      list.push(`${props.modelError}；模型名称回退为引用，保存时由服务端重新校验。`)
+      list.push(`${props.modelError}；模型名称回退为引用，打开模型配置时会重试。`)
     }
     return list
   }

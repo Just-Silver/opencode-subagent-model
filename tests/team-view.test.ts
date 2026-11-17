@@ -29,6 +29,7 @@ import {
 } from "../plugin/opencode-team/view/model.ts"
 import {
   loadTeamDashboard,
+  refreshModels,
   restoreAgentModel,
   saveAgentModel,
 } from "../plugin/opencode-team/view/team.ts"
@@ -479,6 +480,16 @@ test("Agent 列表读取失败时明确报错", async () => {
   const result = await loadTeamDashboard(h.ctx, CURRENT_LOCATION)
   assert.equal(result.kind, "blocked")
   if (result.kind === "blocked") assert.match(result.message, /无法读取 Agent 列表/)
+})
+
+test("打开模型配置前刷新目录会强制同步并只保留聊天模型", async () => {
+  const h = await harness({
+    models: [ALPHA, BETA, VISION],
+    location: CURRENT_LOCATION,
+  })
+  const result = await refreshModels(h.ctx, CURRENT_LOCATION)
+  assert.deepEqual(result.models.map((model) => model.id), ["alpha", "beta"])
+  assert.deepEqual(h.calls.modelSyncLocations, [CURRENT_LOCATION])
 })
 
 test("模型目录失败时仍打开面板，并保留错误说明", async () => {

@@ -170,19 +170,28 @@ async function readAgents(
 async function readModels(
   ctx: Context,
   location: Location,
+  force = false,
 ): Promise<{ readonly models: ModelInfo[]; readonly error?: string }> {
   const collection = ctx.data.location.model
   try {
     // `list` reads the per-location cache the host fills at boot; syncing only when it is
     // absent avoids a network hop on every open while still distinguishing "not loaded"
     // from a genuinely empty catalog.
-    if (collection.list(location) === undefined) await collection.sync(location)
+    if (force || collection.list(location) === undefined) await collection.sync(location)
     const models = collection.list(location)
     if (models === undefined) throw new Error("模型目录未返回数据")
     return { models: models.filter(isChatModel) }
   } catch (error) {
     return { models: [], error: `无法读取模型列表：${message(error)}` }
   }
+}
+
+/** 打开模型配置前重新同步一次目录，覆盖首次加载失败或目录为空的情况。 */
+export async function refreshModels(
+  ctx: Context,
+  location: Location,
+): Promise<{ readonly models: ModelInfo[]; readonly error?: string }> {
+  return readModels(ctx, location, true)
 }
 
 async function readProviders(ctx: Context, location: Location): Promise<ProviderInfo[]> {

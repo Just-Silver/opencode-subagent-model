@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-18
+
 ### Changed
 
 - `/team` 从两级选择菜单升级为 Agent Team Dashboard：左侧 Agent 列表、右侧详情面板、

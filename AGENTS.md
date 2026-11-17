@@ -21,7 +21,7 @@ npm 包名 `@justsilver/opencode-team`。
 - 源码不放 `.opencode/plugins/`，避免本地自动发现与 npm 安装产生同 ID 重复插件。
 - 策略每次执行前从宿主 storage 读取，不缓存；不直接读写 SQLite。
 - 只在工具成功返回末尾增加模型标记；不注入系统上下文，不额外添加用户侧卡片/通知。
-- 插件只给 QA/Reviewer 注入 `question * deny`；其余权限继承 OpenCode 默认与用户配置，
+- 插件只给 QA/Reviewer 注入 `question * deny` 与 `subagent * deny`；其余权限继承 OpenCode 默认与用户配置，
   Orchestrator 不追加规则，General/Explore 的定义与权限不被修改。
 - 职责边界由 System Prompt 约束：Orchestrator 优先编排并协调并发写入/共享文件冲突；
   QA 独立设计、编写、执行验收测试且不迎合实现修改标准；Reviewer 默认只审查报告，

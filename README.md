@@ -30,10 +30,10 @@ opencode plugin add @justsilver/opencode-team
   修改生产代码需明确授权。
 - 继续复用内置 `general`、`explore`；不重复实现已有能力，也不修改它们的权限。
 
-插件只给 QA / Reviewer 注入一条 `question * deny`，防止子代理直接向用户提问：
+插件给 QA / Reviewer 注入 `question * deny` 与 `subagent * deny`，让它们成为不向用户提问、也不再派生下级子代理的叶子子代理：
 
 - Orchestrator 不追加权限规则。
-- QA / Reviewer 除 `question` 外，其余权限继承 OpenCode 默认与用户配置。
+- QA / Reviewer 除 `question`、`subagent` 外，其余权限继承 OpenCode 默认与用户配置。
 - General、Explore 保持内置定义，插件不修改。
 - 职责边界由 System Prompt 约束：
   - Orchestrator 优先编排，简单任务可直接执行，协调并发写入与共享文件冲突，

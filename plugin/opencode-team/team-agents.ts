@@ -17,8 +17,11 @@ export interface TeamAgentDefinition {
   readonly permissions: readonly PermissionRule[]
 }
 
-// Subagents must not ask the user directly; the primary Orchestrator owns user interaction.
-const QUESTION_DENY: readonly PermissionRule[] = [{ action: "question", resource: "*", effect: "deny" }]
+// QA and Reviewer are leaves: the primary Orchestrator owns user interaction and further delegation.
+const LEAF_SUBAGENT_PERMISSIONS: readonly PermissionRule[] = [
+  { action: "question", resource: "*", effect: "deny" },
+  { action: "subagent", resource: "*", effect: "deny" },
+]
 
 export const TEAM_AGENTS: readonly TeamAgentDefinition[] = [
   {
@@ -37,7 +40,7 @@ export const TEAM_AGENTS: readonly TeamAgentDefinition[] = [
       "Independent quality assurance agent. Designs and executes acceptance and regression tests against requirements and contracts, investigates failures, and independently verifies fixes. Production code changes require explicit authorization.",
     mode: "subagent",
     system: QA_PROMPT,
-    permissions: QUESTION_DENY,
+    permissions: LEAF_SUBAGENT_PERMISSIONS,
   },
   {
     id: "reviewer",
@@ -46,7 +49,7 @@ export const TEAM_AGENTS: readonly TeamAgentDefinition[] = [
       "Independent code reviewer. Primarily reviews source code for correctness, architecture, and risks, using targeted verification when needed. Reports evidence-based findings without replacing QA acceptance testing. Production code changes require explicit authorization.",
     mode: "subagent",
     system: REVIEWER_PROMPT,
-    permissions: QUESTION_DENY,
+    permissions: LEAF_SUBAGENT_PERMISSIONS,
   },
 ]
 

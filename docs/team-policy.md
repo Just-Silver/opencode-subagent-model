@@ -15,8 +15,8 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
 2. 按 Agent ID 为子代理指定模型与变体；未配置的 Agent 继承 OpenCode 原生规则。
 
 不做主代理模型覆盖，不管理供应商或凭据，不修改已经执行中的请求，不直接读写 SQLite，
-只给 QA/Reviewer 注入 `question * deny`，不通过提示词宣称权限隔离；其余职责边界由 System Prompt
-约束，需要硬限制时由用户配置。
+只给 QA/Reviewer 注入 `question * deny` 与 `subagent * deny`，不通过提示词宣称权限隔离；
+其余职责边界由 System Prompt 约束，需要硬限制时由用户配置。
 
 ## Agent 注册
 
@@ -24,7 +24,8 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
   `editor.update(id, fn)` 会创建缺失的 Agent；插件卸载时宿主关闭注册 scope，Agent 自动消失。
 - 注册内容只包含 `orchestrator`、`qa`、`reviewer`；`general`、`explore` 由内置插件继续提供。
 - 插件写 `name`、`description`、`mode`、`system`、`hidden`；权限只给 `qa`、`reviewer`
-  追加 `question * deny`，Orchestrator 不追加，其余权限来自 OpenCode 默认值和用户配置。
+  追加 `question * deny` 与 `subagent * deny`，Orchestrator 不追加，其余权限来自 OpenCode
+  默认值和用户配置。
 - 用户配置的 Agent 在宿主里注册得更晚：`packages/core/src/plugin/supervisor.ts` 将外部插件放在
   `pre`，`ConfigAgentPlugin` 在 `post`。因此项目/全局 `agent` 配置会覆盖同名内置/插件默认值；
   `disabled: true` 会移除该 Agent。冲突不静默：以用户配置为准，插件不反向覆盖。
@@ -176,6 +177,6 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
 尺寸模型，以及内嵌模型配置的 Provider 分组、区域切换、过滤后选中项、语义色映射、Variant、
 保存与失败提示。权限用例复刻宿主的最后命中、deny 优先于 saved allow、会话追加、
 工具可见性、`edit/write/patch` 共用动作和子会话取用规则，并验证插件只注入 QA/Reviewer 的
-`question` 拒绝、用户配置可覆盖。TUI 视觉、键盘与真实交互由用户手动验证，不提交临时渲染脚本；
+`question` / `subagent` 拒绝、用户配置可覆盖。TUI 视觉、键盘与真实交互由用户手动验证，不提交临时渲染脚本；
 双入口 esbuild、`npm pack --dry-run`、`git diff --check` 作为回归验证。
 未进行真实供应商请求或旧 SQLite 数据操作。

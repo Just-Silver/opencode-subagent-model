@@ -76,12 +76,16 @@ test("只注册 Orchestrator、QA、Reviewer，不改动内置 general/explore",
   assert.equal(agents.get("explore")?.name, "Explore")
 })
 
-test("只给 QA/Reviewer 注入 question 拒绝，其余权限继承默认与用户配置", async () => {
+test("QA/Reviewer 是叶子子代理：拒绝 question 与 subagent，其余权限继承默认与用户配置", async () => {
   const agents = await apply()
+  const leaf = [
+    { action: "question", resource: "*", effect: "deny" },
+    { action: "subagent", resource: "*", effect: "deny" },
+  ]
 
   assert.deepEqual(agents.get("orchestrator")?.permissions, [])
-  assert.deepEqual(agents.get("qa")?.permissions, [{ action: "question", resource: "*", effect: "deny" }])
-  assert.deepEqual(agents.get("reviewer")?.permissions, [{ action: "question", resource: "*", effect: "deny" }])
+  assert.deepEqual(agents.get("qa")?.permissions, leaf)
+  assert.deepEqual(agents.get("reviewer")?.permissions, leaf)
 })
 
 test("团队成员保留角色字段与职责提示词", async () => {
@@ -138,6 +142,7 @@ test("后注册的用户配置可以覆盖同名团队成员，冲突不会静�
   assert.equal(qa.hidden, true)
   assert.deepEqual(qa.permissions, [
     { action: "question", resource: "*", effect: "deny" },
+    { action: "subagent", resource: "*", effect: "deny" },
     { action: "edit", resource: "*", effect: "allow" },
   ])
 })

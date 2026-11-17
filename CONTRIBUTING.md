@@ -17,7 +17,7 @@ plugin/opencode-team/
   policy.ts                存储、校验、旧版迁移、执行前覆盖和执行后告知
   model-ref.ts             模型引用解析、格式化与 chat 模型判定
   team-ids.ts              团队子代理固定顺序
-  team-agents.ts           Orchestrator / QA / Reviewer 定义（仅 QA/Reviewer 拒绝 question）
+  team-agents.ts           Orchestrator / QA / Reviewer 定义（QA/Reviewer 拒绝 question 与 subagent）
   prompts.ts               三份 System Prompt 与职责边界
   legacy.ts                旧插件检测与冲突信息
   view/configure.tsx       打开 Dashboard，注入保存/恢复回调

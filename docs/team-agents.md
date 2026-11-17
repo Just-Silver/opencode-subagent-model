@@ -35,8 +35,8 @@
 完整提示词按角色分列在 [`docs/角色提示词/`](./角色提示词/)；改提示词只改 `prompts.ts`，
 该目录是同步的设计稿。
 
-这些是**职责约束**，不是权限隔离。插件只给两个子代理注入一条 `question` 拒绝，其余工具权限
-来自 OpenCode 默认值和用户配置。
+职责边界主要靠 System Prompt，不是权限沙箱；插件只额外给两个子代理注入 `question` 与
+`subagent` 两条硬性拒绝，其余工具权限来自 OpenCode 默认值和用户配置。
 
 ## 权限策略
 
@@ -44,21 +44,24 @@
 
 ```text
 question * deny
+subagent * deny
 ```
 
-原因：子代理不应直接向用户提问，用户交互由主代理 Orchestrator 负责。
+原因：子代理不应直接向用户提问，也不应继续派生下级子代理；用户交互和进一步委派由主代理
+Orchestrator 负责。两者因此都是叶子子代理。
 
 - `orchestrator`：不追加任何权限规则
-- `qa`、`reviewer`：只追加 `question * deny`
+- `qa`、`reviewer`：追加 `question * deny`、`subagent * deny`
 - `general`、`explore`：定义与权限均不修改
 - 所有 Agent 的其余权限继承 OpenCode 默认值及用户在 `opencode.json` 中的配置
 
 因此默认情况下：
 
 - Orchestrator 可以提问；QA、Reviewer 不能提问
-- Orchestrator、QA、Reviewer 都可以编辑文件、执行 Shell、派生子代理
+- Orchestrator 可以派生子代理；QA、Reviewer 不能派生子代理
+- Orchestrator、QA、Reviewer 都可以编辑文件、执行 Shell
 - QA 可以自行创建或修改验收测试；Reviewer 也可以编辑，但 System Prompt 要求默认不修改
-- 用户配置可以覆盖 `question` 拒绝，或进一步限制其他工具
+- 用户配置可以覆盖 `question` / `subagent` 拒绝，或进一步限制其他工具
 
 不要把本插件描述成权限沙箱。职责边界主要靠 System Prompt 和 Orchestrator 协调，而不是强制权限。
 
@@ -80,8 +83,8 @@ question * deny
 ```
 
 这会把 Reviewer 的“默认只审查”变成工具层面的硬限制。也可以给 QA 追加特定的 `edit` 限制，
-给 `qa` / `reviewer` 追加 `question` allow 来覆盖插件的拒绝，或给 `general` 追加 `subagent`
-允许规则来覆盖内置拒绝。
+给 `qa` / `reviewer` 追加 `question` 或 `subagent` allow 来覆盖插件的拒绝，或给 `general`
+追加 `subagent` 允许规则来覆盖内置拒绝。
 
 ### 合并与匹配细节
 
@@ -122,7 +125,7 @@ Agent 的自我声明不视为测试通过。Orchestrator 需要求子代理给�
 
 | 项目 | 决定 | 原因 |
 |---|---|---|
-| 只注入 `question * deny` | 保留 | 子代理不向用户提问；其余权限默认开放、用户配置优先 |
+| 注入 `question * deny` 与 `subagent * deny` | 保留 | 子代理不向用户提问、不再派生下级；其余权限默认开放、用户配置优先 |
 | QA 可写验收测试 | 保留 | 独立设计、编写及执行验收测试 |
 | Reviewer 默认不改代码 | 保留 | 由 System Prompt 约束，不额外做权限系统 |
 | Orchestrator 完整执行能力 | 保留 | 主代理在必要时可以直接处理简单任务 |

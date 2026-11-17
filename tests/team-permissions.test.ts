@@ -72,7 +72,7 @@ function evaluateInput(
   return effects.includes("ask") ? "ask" : "allow"
 }
 
-test("Orchestrator 不注入规则；QA/Reviewer 只拒绝 question，其余继承默认开放", () => {
+test("Orchestrator 不注入规则；QA/Reviewer 拒绝 question 与 subagent，其余继承默认开放", () => {
   const orchestrator = effective("orchestrator")
   for (const action of ["edit", "shell", "subagent", "question", "grep", "glob"]) {
     assert.equal(whollyDisabled(action, orchestrator), false, `orchestrator 不应限制 ${action}`)
@@ -82,13 +82,14 @@ test("Orchestrator 不注入规则；QA/Reviewer 只拒绝 question，其余继�
   for (const agentID of ["qa", "reviewer"]) {
     const rules = effective(agentID)
     assert.equal(whollyDisabled("question", rules), true, `${agentID} 应隐藏 question`)
+    assert.equal(whollyDisabled("subagent", rules), true, `${agentID} 应隐藏 subagent`)
     assert.equal(evaluateInput("question", ["*"], rules), "deny")
-    for (const action of ["edit", "shell", "subagent", "grep", "glob"]) {
+    assert.equal(evaluateInput("subagent", ["general"], rules), "deny")
+    for (const action of ["edit", "shell", "grep", "glob"]) {
       assert.equal(whollyDisabled(action, rules), false, `${agentID} 不应限制 ${action}`)
     }
     assert.equal(evaluateInput("edit", ["src/a.ts"], rules), "allow")
     assert.equal(evaluateInput("shell", ["rm -rf src"], rules), "allow")
-    assert.equal(evaluateInput("subagent", ["general"], rules), "allow")
     assert.equal(evaluateInput("read", [".env"], rules), "ask")
   }
 })
@@ -104,6 +105,10 @@ test("用户配置可以收紧或放开团队成员，插件不覆盖", () => {
   const allowQuestion = effective("qa", [{ action: "question", resource: "*", effect: "allow" }])
   assert.equal(whollyDisabled("question", allowQuestion), false)
   assert.equal(evaluateInput("question", ["*"], allowQuestion), "allow")
+
+  const allowSubagent = effective("qa", [{ action: "subagent", resource: "*", effect: "allow" }])
+  assert.equal(whollyDisabled("subagent", allowSubagent), false)
+  assert.equal(evaluateInput("subagent", ["general"], allowSubagent), "allow")
 
   const denyOrchestratorQuestion = effective("orchestrator", [
     { action: "question", resource: "*", effect: "deny" },
@@ -145,6 +150,9 @@ test("saved always allow 不能覆盖 Agent deny", () => {
 
   const savedQuestion = [{ action: "question", resource: "*", effect: "allow" }] as PermissionRule[]
   assert.equal(evaluateInput("question", ["*"], effective("qa"), savedQuestion), "deny")
+
+  const savedSubagent = [{ action: "subagent", resource: "*", effect: "allow" }] as PermissionRule[]
+  assert.equal(evaluateInput("subagent", ["general"], effective("qa"), savedSubagent), "deny")
 })
 
 test("子会话使用自己的 Agent 规则，派生子代理使用父 Agent 的规则", () => {
@@ -156,7 +164,7 @@ test("子会话使用自己的 Agent 规则，派生子代理使用父 Agent 的
   )
 
   assert.equal(evaluateInput("subagent", ["qa"], GENERAL_NATIVE), "deny")
-  assert.equal(evaluateInput("subagent", ["general"], effective("qa")), "allow")
+  assert.equal(evaluateInput("subagent", ["general"], effective("qa")), "deny")
   assert.equal(evaluateInput("subagent", ["qa"], effective("orchestrator")), "allow")
   assert.equal(evaluateInput("question", ["*"], effective("qa")), "deny")
   assert.equal(evaluateInput("question", ["*"], effective("orchestrator")), "allow")

@@ -11,7 +11,8 @@
 
 - 旧包 `@justsilver/opencode-subagent-model` 已在 npm 标记 deprecated（覆盖全部已发布版本），
   弃用提示指向 `@justsilver/opencode-team`；旧包保留可安装，不撤包。
-- `@justsilver/opencode-team` 的 `next` 已对齐到 `0.2.1`，`latest` 与 `next` 指向同一版本。
+- 修复从 npm 安装后面板无响应：`@opentui/core`、`@opentui/solid`、`solid-js` 改为 optional
+  peerDependencies，npm 不再把宿主运行时副本装进插件目录。
 
 ## [0.2.1] - 2026-11-18
 

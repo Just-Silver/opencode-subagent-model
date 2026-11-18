@@ -2,7 +2,7 @@
 import type { Plugin } from "@opencode/plugin/tui"
 
 import { TeamDashboard } from "./dashboard.tsx"
-import type { DashboardAgent } from "./model.ts"
+import { normalizeFavorites, toggleFavorite, type DashboardAgent } from "./model.ts"
 import {
   currentLocation,
   loadTeamDashboard,
@@ -28,6 +28,10 @@ export async function configureTeam(ctx: Plugin.Context): Promise<void> {
   const data = result.data
   let overrides: Readonly<Record<string, string>> = data.overrides
   let closed = false
+  // 收藏是界面偏好，与模型策略分开存；与 /models 的私有 state 不互通。
+  const [favorites, setFavorites] = ctx.storage.store("team-favorites", {
+    initial: { models: [] as string[] },
+  })
 
   const open = (): void => {
     if (token !== latest || closed) return
@@ -43,6 +47,20 @@ export async function configureTeam(ctx: Plugin.Context): Promise<void> {
           agentsSupported={data.agentsSupported}
           {...(data.agentsError === undefined ? {} : { agentsError: data.agentsError })}
           refreshModels={() => refreshModels(ctx, location)}
+          favorites={normalizeFavorites(favorites)}
+          toggleFavorite={async (ref) => {
+            try {
+              await setFavorites((draft) => {
+                draft.models = toggleFavorite(normalizeFavorites(draft), ref)
+              })
+              return { ok: true }
+            } catch (error) {
+              return {
+                ok: false,
+                error: error instanceof Error ? error.message : String(error),
+              }
+            }
+          }}
           theme={ctx.theme}
           layer={(factory) => ctx.keymap.layer(factory)}
           clearDialog={() => ctx.ui.dialog.clear()}

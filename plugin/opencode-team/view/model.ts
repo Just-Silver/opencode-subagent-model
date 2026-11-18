@@ -154,6 +154,7 @@ export interface ModelGroup {
   readonly providerID: string
   readonly providerName: string
   readonly models: readonly ModelInfo[]
+  readonly favoriteGroup?: boolean
 }
 
 export interface ModelConfigLayout extends DashboardLayout {
@@ -202,38 +203,101 @@ export function buildModelRef(baseRef: string, variant: string | undefined): str
   return variant === undefined || variant === "" ? baseRef : `${baseRef}#${variant}`
 }
 
+export const FAVORITES_GROUP_ID = "__favorites__"
+
+/** 存储值是宿主 TUI 的持久对象；只保留合法基础引用，非法项忽略但不回写。 */
+export function normalizeFavorites(value: unknown): string[] {
+  if (typeof value !== "object" || value === null) return []
+  const models = (value as { models?: unknown }).models
+  if (!Array.isArray(models)) return []
+  const result: string[] = []
+  for (const entry of models) {
+    if (typeof entry !== "string") continue
+    const parsed = parseModelRef(entry)
+    if (parsed === undefined) continue
+    const base = `${parsed.providerID}/${parsed.id}`
+    if (!result.includes(base)) result.push(base)
+  }
+  return result
+}
+
+export function toggleFavorite(favorites: readonly string[], ref: string): string[] {
+  return favorites.includes(ref)
+    ? favorites.filter((favorite) => favorite !== ref)
+    : [...favorites, ref]
+}
+
+function matchesModel(
+  model: ModelInfo,
+  tokens: readonly string[],
+  providers: readonly ProviderInfo[],
+): boolean {
+  if (!isChatModel(model)) return false
+  const provider = providerLabel(providers, model.providerID)
+  const text = [model.name, model.id, model.providerID, provider, modelRefOf(model)]
+    .join(" ")
+    .toLowerCase()
+  return tokens.every((token) => text.includes(token))
+}
+
+function sortModels(list: ModelInfo[], current?: string): ModelInfo[] {
+  return list.toSorted((left, right) => {
+    const currentRank = (model: ModelInfo) => (modelRefOf(model) === current ? 0 : 1)
+    return (
+      currentRank(left) - currentRank(right) ||
+      (left.name || left.id).localeCompare(right.name || right.id) ||
+      left.id.localeCompare(right.id)
+    )
+  })
+}
+
 export function modelGroups(
   models: readonly ModelInfo[],
   providers: readonly ProviderInfo[],
   query: string,
+  favorites: readonly string[] = [],
+  current?: string,
 ): ModelGroup[] {
   const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const favoriteSet = new Set(favorites)
+  const favoriteModels: ModelInfo[] = []
   const byProvider = new Map<string, { name: string; models: ModelInfo[] }>()
   for (const model of models) {
-    if (!isChatModel(model)) continue
+    if (!matchesModel(model, tokens, providers)) continue
+    if (favoriteSet.has(modelRefOf(model))) {
+      favoriteModels.push(model)
+      continue
+    }
     const provider = providerLabel(providers, model.providerID)
-    const text = [model.name, model.id, model.providerID, provider, modelRefOf(model)]
-      .join(" ")
-      .toLowerCase()
-    if (!tokens.every((token) => text.includes(token))) continue
     const group = byProvider.get(model.providerID) ?? { name: provider, models: [] }
     group.models.push(model)
     byProvider.set(model.providerID, group)
   }
-  return [...byProvider.entries()]
+  // 宿主把 current 的滚动定位推迟到下一帧，首帧仍停在顶部；当前项置顶才能打开即见。
+  const hasCurrent = (models: readonly ModelInfo[]) =>
+    current !== undefined && models.some((model) => modelRefOf(model) === current)
+  const providerGroups: ModelGroup[] = [...byProvider.entries()]
     .map(([providerID, group]) => ({
       providerID,
       providerName: group.name,
-      models: group.models.toSorted(
-        (left, right) =>
-          (left.name || left.id).localeCompare(right.name || right.id) || left.id.localeCompare(right.id),
-      ),
+      models: sortModels(group.models, current),
     }))
     .toSorted(
       (left, right) =>
+        Number(hasCurrent(right.models)) - Number(hasCurrent(left.models)) ||
         left.providerName.localeCompare(right.providerName) ||
         left.providerID.localeCompare(right.providerID),
     )
+  if (favoriteModels.length === 0) return providerGroups
+  return [
+    {
+      providerID: FAVORITES_GROUP_ID,
+      providerName: "FAVORITES",
+      models: sortModels(favoriteModels, current),
+      favoriteGroup: true,
+    },
+    ...providerGroups,
+  ]
 }
 
 export function modelConfigLayoutFor(width: number, height: number): ModelConfigLayout {

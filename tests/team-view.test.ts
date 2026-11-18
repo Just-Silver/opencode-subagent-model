@@ -18,6 +18,8 @@ import {
   modelConfigLayoutFor,
   modelGroups,
   nextRegion,
+  normalizeFavorites,
+  toggleFavorite,
   promptInfo,
   resolveModel,
   roleLabel,
@@ -660,6 +662,59 @@ test("模型配置按 Provider 分组，并支持名称、引用与 Provider 搜
     ["alpha"],
   )
   assert.deepEqual(modelGroups([ALPHA, BETA], PROVIDERS, "不存在"), [])
+})
+
+test("收藏分组置顶，收藏模型不再在 Provider 分组重复", () => {
+  const grouped = modelGroups([ALPHA, BETA], PROVIDERS, "", ["provider-b/beta"])
+  assert.deepEqual(grouped.map((group) => group.providerName), ["FAVORITES", "Provider A"])
+  assert.deepEqual(grouped[0]!.models.map((model) => model.id), ["beta"])
+  assert.deepEqual(grouped[1]!.models.map((model) => model.id), ["alpha"])
+})
+
+test("收藏分组同样参与搜索过滤，空结果不产生空分组", () => {
+  assert.deepEqual(
+    modelGroups([ALPHA, BETA], PROVIDERS, "Alpha", ["provider-b/beta"]).map((group) => group.providerName),
+    ["Provider A"],
+  )
+  assert.deepEqual(
+    modelGroups([ALPHA, BETA], PROVIDERS, "Beta", ["provider-b/beta"])[0]!.models.map((model) => model.id),
+    ["beta"],
+  )
+})
+
+test("当前模型及其 Provider 分组置顶，打开首帧即可见", () => {
+  const grouped = modelGroups([ALPHA, BETA], PROVIDERS, "", [], "provider-b/beta")
+  assert.deepEqual(grouped.map((group) => group.providerName), ["Provider B", "Provider A"])
+  assert.deepEqual(grouped[0]!.models.map((model) => model.id), ["beta"])
+})
+
+test("收藏组内的当前模型排到首行", () => {
+  const GAMMA: TestModel = { id: "gamma", providerID: "provider-a", name: "Gamma", type: "chat" }
+  const grouped = modelGroups(
+    [ALPHA, BETA, GAMMA],
+    PROVIDERS,
+    "",
+    ["provider-a/alpha", "provider-b/beta"],
+    "provider-b/beta",
+  )
+  assert.deepEqual(grouped[0]!.models.map((model) => model.id), ["beta", "alpha"])
+})
+
+test("收藏引用不在当前目录时不出组、不报错", () => {
+  assert.deepEqual(modelGroups([ALPHA], PROVIDERS, "", ["provider-b/gone"]), [
+    { providerID: "provider-a", providerName: "Provider A", models: [ALPHA] },
+  ])
+})
+
+test("收藏切换只增删基础引用，存储值规范化丢弃非法项", () => {
+  assert.deepEqual(toggleFavorite([], "provider-a/alpha"), ["provider-a/alpha"])
+  assert.deepEqual(toggleFavorite(["provider-a/alpha"], "provider-a/alpha"), [])
+  assert.deepEqual(
+    normalizeFavorites({ models: ["provider-a/alpha#high", "provider-a/alpha", "bad", 3] }),
+    ["provider-a/alpha"],
+  )
+  assert.deepEqual(normalizeFavorites(undefined), [])
+  assert.deepEqual(normalizeFavorites({ models: "x" }), [])
 })
 
 test("Variant 来自模型实际能力，引用按是否选择 Variant 生成", () => {

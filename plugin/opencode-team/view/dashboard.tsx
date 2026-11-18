@@ -59,6 +59,8 @@ export interface TeamDashboardProps {
     readonly models: readonly ModelInfo[]
     readonly error?: string
   }>
+  readonly favorites: readonly string[]
+  readonly toggleFavorite: (ref: string) => Promise<{ readonly ok: boolean; readonly error?: string }>
   readonly theme: Theme
   readonly layer: (factory: () => KeymapLayer) => void
   readonly clearDialog: () => void
@@ -379,6 +381,8 @@ export function TeamDashboard(props: TeamDashboardProps) {
                 providers={props.providers}
                 currentOverride={overrides()[agent().id]}
                 {...(modelError() === undefined ? {} : { modelError: modelError() })}
+                favorites={props.favorites}
+                toggleFavorite={props.toggleFavorite}
                 theme={theme()}
                 layer={props.layer}
                 feedback={feedback()}

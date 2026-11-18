@@ -28,7 +28,9 @@ npm 包名 `@justsilver/opencode-team`。
 - 用户配置合并顺序在插件之后，测试必须覆盖用户对插件默认权限的覆盖。
 - 测试只测本次业务行为，外部边界才用假件；纯迁移复用已有用例，不为类型结构、默认值或框架行为补测试。
 - 注释只解释不显然的约束；迁移、来源、版本和审查记录写进文档。
-- npm 包与本地目录两种加载方式不可同时启用；TUI 代码更新后须完全重启客户端。
+- npm 包与本地目录两种加载方式不可同时启用；本地目录必须指向 `<仓库>/plugin/opencode-team`，
+  解析规则与全局配置路径见 [CONTRIBUTING 的本地调试](CONTRIBUTING.md#本地调试)，不要每次重查宿主源码；
+  TUI 代码更新后须完全重启客户端。
 - TUI 入口必须发布预编译的 `dist/tui.js`：npm 插件位于 `node_modules`，宿主不会转换该路径下的
   `.tsx`（anomalyco/opencode#39986），保留 JSX 会首帧后不重绘或直接找不到运行时。
   `exports["./tui"]` 指向 `dist/tui.js`；`@opentui/*` 与 `solid-js` 保持 optional peer，避免 npm
@@ -74,4 +76,5 @@ CI 与 Release 工作流执行同一组检查，见 [CONTRIBUTING](CONTRIBUTING.
 | `docs/team-agents.md` | 开发者：Orchestrator/QA/Reviewer 角色、提示词来源与职责、权限边界 | 模型存储契约、发版流程 |
 | `plugin/opencode-team/prompts/` | 提示词唯一来源：按角色拆分的 `description`（Frontmatter）与 System Prompt 正文 | 注册、权限与模型策略 |
 | `docs/extraction-plan.md` | 实现者：旧独立插件迁移历史与验收记录 | 当前契约、使用教程 |
+| `docs/superpowers/plans/` | 实现者：各次改动的历史实施计划与验收步骤 | 当前契约、使用教程 |
 | `CHANGELOG.md` | 用户：版本变更历史 | 完整设计与流程 |

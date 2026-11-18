@@ -41,13 +41,20 @@
 
 宿主只加载当前配置指向的那一份插件，改了本仓库源码不代表宿主会看到：
 
-- 全局 `plugins` 写 `"@justsilver/opencode-team"` 时，运行的是 npm 已发布版本，本地改动无效；
+- 全局配置是 `~/.config/opencode/opencode.json`（Windows 为
+  `C:\Users\<用户>\.config\opencode\opencode.json`）的 `plugins` 数组。
+- 写 `"@justsilver/opencode-team"` 时运行的是 npm 已发布版本，本地改动无效；
 - 调试本仓库改动时，把该项换成插件目录的绝对路径，并移除 npm 同名项（同一插件 ID 不能并存）：
 
   ```json
   { "package": "<仓库>/plugin/opencode-team" }
   ```
 
+- 必须指向 `plugin/opencode-team` 而不是仓库根：宿主解析本地目录时，有 `package.json` 且声明
+  `exports` 就按包导出解析（本仓库的 `./tui` 会落到 `dist/tui.js`，需要先构建）；没有
+  `package.json` 才按根目录约定文件名 `index`（server）与 `tui`（TUI 源码）加载。指到
+  `plugin/opencode-team` 才是源码模式，不需要构建。依据见 `packages/plugin/src/host.ts` 的
+  `resolve()`，不需要每次重新翻宿主源码。
 - 改完配置与代码后完全退出并重新启动 OpenCode；TUI 入口只在启动时加载，不存在热更新；
 - 要让用户拿到改动，只能按「npm 分发」升版本发布，不能在本地验证通过后假定已生效。
 

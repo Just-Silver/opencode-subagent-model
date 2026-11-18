@@ -65,6 +65,8 @@ export interface ModelConfigProps {
   readonly providers: readonly ProviderInfo[]
   readonly currentOverride?: string
   readonly modelError?: string
+  readonly favorites: readonly string[]
+  readonly toggleFavorite: (ref: string) => Promise<{ readonly ok: boolean; readonly error?: string }>
   readonly theme: Theme
   readonly layer: (factory: () => KeymapLayer) => void
   readonly feedback?: Feedback
@@ -90,7 +92,13 @@ export function ModelConfigView(props: ModelConfigProps) {
     }
   })
 
-  const initialGroups = modelGroups(props.models, props.providers, "")
+  const initialGroups = modelGroups(
+    props.models,
+    props.providers,
+    "",
+    props.favorites,
+    current()?.baseRef,
+  )
   const initialVisible = initialGroups.flatMap((group) => group.models)
   const firstModel = initialVisible[0]
   const initialCurrent = current()
@@ -120,7 +128,9 @@ export function ModelConfigView(props: ModelConfigProps) {
   const [pendingRestore, setPendingRestore] = createSignal(false)
   let disposed = false
 
-  const groups = createMemo(() => modelGroups(props.models, props.providers, query()))
+  const groups = createMemo(() =>
+    modelGroups(props.models, props.providers, query(), props.favorites, current()?.baseRef),
+  )
   const flatModels = createMemo(() => groups().flatMap((group) => group.models))
   // 选中项必须仍在过滤后的列表里；搜索无结果时不能继续对旧模型执行保存。
   const selectedModel = createMemo(() =>
@@ -181,6 +191,23 @@ export function ModelConfigView(props: ModelConfigProps) {
   createEffect(on(selectedRef, (ref) => ensureModelVisible(ref)))
   createEffect(on(query, () => ensureModelVisible(selectedRef())))
   createEffect(on(variantCursor, (index) => ensureVariantVisible(index)))
+  // 收藏切换会把选中行移到 FAVORITES 或移回 Provider 组；选中项没变，但位置可能已在视口外。
+  createEffect(
+    on(
+      () => props.favorites,
+      (next, prev) => {
+        if (
+          prev !== undefined &&
+          next.length === prev.length &&
+          next.every((ref, index) => ref === prev[index])
+        ) {
+          return
+        }
+        ensureModelVisible(selectedRef())
+      },
+      { defer: true },
+    ),
+  )
   onCleanup(() => {
     disposed = true
     if (focusTimer !== undefined) clearTimeout(focusTimer)
@@ -200,24 +227,45 @@ export function ModelConfigView(props: ModelConfigProps) {
   }
 
   function ensureModelVisible(ref: string): void {
-    ensureVisible(modelScroll, modelNodes.get(ref))
+    ensureVisible(modelScroll, () => modelNodes.get(ref))
   }
 
   function ensureVariantVisible(index: number): void {
-    ensureVisible(variantScroll, variantNodes.get(index))
+    ensureVisible(variantScroll, () => variantNodes.get(index))
   }
 
-  function ensureVisible(scroll: ScrollBoxRenderable | undefined, node: Renderable | undefined): void {
-    if (scroll === undefined || node === undefined || node.isDestroyed) return
+  // 分组重算会销毁并重建行节点，调用时捕获的 node 到定时器触发时已失效；必须惰性查找。
+  // 首次挂载时滚动容器与行节点都比 effect 晚就绪，因此缺节点或高度未布局时有限重试。
+  const VISIBLE_RETRIES = 5
+  function ensureVisible(
+    scroll: ScrollBoxRenderable | undefined,
+    nodeOf: () => Renderable | undefined,
+  ): void {
+    if (scroll === undefined || scroll.isDestroyed) return
     if (scrollTimer !== undefined) clearTimeout(scrollTimer)
-    scrollTimer = setTimeout(() => {
-      if (scroll === undefined || scroll.isDestroyed || node.isDestroyed) return
-      const top = node.y - scroll.y
-      if (top < 0) scroll.scrollBy(top - 1)
-      else if (top + node.height > scroll.height) {
-        scroll.scrollBy(top + node.height - scroll.height + 1)
-      }
-    }, 0)
+    const attempt = (retries: number): void => {
+      scrollTimer = setTimeout(
+        () => {
+          if (scroll.isDestroyed) return
+          if (scroll.height <= 0) {
+            if (retries > 0) attempt(retries - 1)
+            return
+          }
+          const node = nodeOf()
+          if (node === undefined || node.isDestroyed) {
+            if (retries > 0) attempt(retries - 1)
+            return
+          }
+          const top = node.y - scroll.y
+          if (top < 0) scroll.scrollBy(top - 1)
+          else if (top + node.height > scroll.height) {
+            scroll.scrollBy(top + node.height - scroll.height + 1)
+          }
+        },
+        retries === VISIBLE_RETRIES ? 0 : 16,
+      )
+    }
+    attempt(VISIBLE_RETRIES)
   }
 
   function cycleRegion(): void {
@@ -376,6 +424,49 @@ export function ModelConfigView(props: ModelConfigProps) {
     }
   }
 
+  let toggling = false
+
+  async function toggleFavoriteCurrent(): Promise<void> {
+    if (toggling || saving() || pendingRestore()) return
+    const model = selectedModel()
+    if (model === undefined) {
+      props.notify({
+        tone: "warning",
+        message: query().trim() !== "" ? "没有匹配的模型，无法收藏。" : "请选择一个模型。",
+      })
+      return
+    }
+    const ref = modelRefOf(model)
+    const wasFavorite = props.favorites.includes(ref)
+    toggling = true
+    try {
+      const result = await props.toggleFavorite(ref)
+      if (disposed) return
+      props.notify(
+        result.ok
+          ? {
+              tone: "success",
+              message: wasFavorite
+                ? `已取消收藏 ${model.name || model.id}`
+                : `已收藏 ${model.name || model.id}`,
+            }
+          : {
+              tone: "error",
+              message: `收藏操作失败：${result.error ?? "未知错误"}`,
+            },
+      )
+    } catch (error) {
+      if (disposed) return
+      props.notify({
+        tone: "error",
+        message: `收藏操作失败：${error instanceof Error ? error.message : String(error)}`,
+      })
+    } finally {
+      toggling = false
+      scheduleFocusSearch()
+    }
+  }
+
   function escape(): void {
     if (saving()) return
     if (pendingRestore()) {
@@ -442,6 +533,12 @@ export function ModelConfigView(props: ModelConfigProps) {
         bind: "ctrl+r",
         enabled: () => !pendingRestore(),
         run: requestRestore,
+      },
+      {
+        id: "opencode-team.model.favorite",
+        bind: "ctrl+f",
+        enabled: () => !pendingRestore() && !saving(),
+        run: () => void toggleFavoriteCurrent(),
       },
       {
         id: "opencode-team.model.home",
@@ -539,7 +636,10 @@ export function ModelConfigView(props: ModelConfigProps) {
               setFocus("models")
             }}
             onRef={(ref, node) => modelNodes.set(ref, node)}
-            onScrollRef={(value) => (modelScroll = value)}
+            onScrollRef={(value) => {
+              modelScroll = value
+              ensureModelVisible(selectedRef())
+            }}
           />
         </Show>
         <Show when={split()}>
@@ -563,7 +663,10 @@ export function ModelConfigView(props: ModelConfigProps) {
               setFocus("variants")
             }}
             onRef={(index, node) => variantNodes.set(index, node)}
-            onScrollRef={(value) => (variantScroll = value)}
+            onScrollRef={(value) => {
+              variantScroll = value
+              ensureVariantVisible(variantCursor())
+            }}
           />
         </Show>
       </box>
@@ -950,6 +1053,7 @@ function Foot(props: {
         { key: "←→", label: "切换" },
         { key: "输入", label: "搜索" },
         { key: "Enter", label: enterLabel() },
+        { key: "Ctrl+F", label: "收藏" },
         { key: "Ctrl+R", label: "恢复原生" },
         { key: "ESC", label: "返回" },
       ]
@@ -959,6 +1063,7 @@ function Foot(props: {
       { key: "←→", label: "切换" },
       { key: "输入", label: "搜索" },
       { key: "Enter", label: enterLabel() },
+      { key: "Ctrl+F", label: "收藏" },
       { key: "Ctrl+R", label: "恢复原生" },
       { key: "ESC", label: "返回" },
     ]

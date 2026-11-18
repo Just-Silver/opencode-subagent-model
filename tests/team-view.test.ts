@@ -10,10 +10,16 @@ import {
   buildDashboardAgent,
   buildDashboardGroups,
   buildModelRef,
+  clipModelName,
+  clipText,
+  displayWidth,
   effectTone,
   feedbackDismissMs,
   filterDashboardGroups,
   firstVisibleRef,
+  fitModelParts,
+  formatContextWindow,
+  formatModelPrice,
   layoutFor,
   modelConfigLayoutFor,
   modelGroups,
@@ -23,9 +29,11 @@ import {
   promptInfo,
   resolveModel,
   roleLabel,
+  selectionState,
   settingsRowVisible,
   statusTone,
   summarizePermissions,
+  variantForSelection,
   variantsFor,
   type DashboardAgent,
   type DashboardAgentInput,
@@ -289,7 +297,11 @@ test("面板按团队范围分组：保留 Orchestrator 与所有可见子代理
   const groups = buildDashboardGroups(inputs(), {}, [ALPHA], PROVIDERS)
   assert.deepEqual(
     groups.map((group) => group.title),
-    ["PRIMARY", "SUBAGENTS · 4"],
+    ["PRIMARY", "SUBAGENTS"],
+  )
+  assert.deepEqual(
+    groups.map((group) => group.count),
+    [1, 4],
   )
   assert.deepEqual(
     groups[0]!.agents.map((agent) => agent.id),
@@ -414,7 +426,8 @@ test("搜索匹配名称、状态、来源与模型，并更新子代理计数",
     filtered.flatMap((group) => group.agents.map((agent) => agent.id)),
     ["qa"],
   )
-  assert.equal(filtered[0]!.title, "SUBAGENTS · 1")
+  assert.equal(filtered[0]!.title, "SUBAGENTS")
+  assert.equal(filtered[0]!.count, 1)
 
   const byModel = filterDashboardGroups(groups, "Provider A")
   assert.ok(byModel.flatMap((group) => group.agents).some((agent) => agent.id === "qa"))
@@ -423,29 +436,57 @@ test("搜索匹配名称、状态、来源与模型，并更新子代理计数",
   assert.equal(filterDashboardGroups(groups, "  ").length, groups.length)
 })
 
-test("布局在窄终端切换单栏，在低高度切换紧凑行", () => {
+test("布局按弹窗内容宽度切换单栏，并给 Agent 列表留出模型名空间", () => {
   assert.deepEqual(layoutFor(120, 32), {
     split: true,
     compact: false,
     minimal: false,
+    dense: false,
     dialogHeight: 28,
-    listWidth: 32,
+    listWidth: 48,
+    contentWidth: 112,
   })
   assert.deepEqual(layoutFor(80, 24), {
     split: false,
-    compact: true,
+    compact: false,
     minimal: false,
+    dense: true,
     dialogHeight: 20,
-    listWidth: 28,
+    listWidth: 74,
+    contentWidth: 74,
+  })
+  assert.deepEqual(layoutFor(100, 32), {
+    split: true,
+    compact: false,
+    minimal: false,
+    dense: false,
+    dialogHeight: 28,
+    listWidth: 38,
+    contentWidth: 94,
+  })
+  assert.deepEqual(layoutFor(160, 32), {
+    split: true,
+    compact: false,
+    minimal: false,
+    dense: false,
+    dialogHeight: 28,
+    listWidth: 48,
+    contentWidth: 112,
   })
   assert.deepEqual(layoutFor(40, 12), {
     split: false,
     compact: true,
     minimal: true,
+    dense: true,
     dialogHeight: 8,
-    listWidth: 28,
+    listWidth: 34,
+    contentWidth: 34,
   })
   assert.equal(layoutFor(60, 8).dialogHeight, 6)
+  assert.equal(layoutFor(80, 28).dense, true)
+  assert.equal(layoutFor(80, 29).dense, false)
+  assert.equal(layoutFor(93, 32).split, false)
+  assert.equal(layoutFor(94, 32).split, true)
 })
 
 test("加载面板数据绑定当前 location，模型目录只保留聊天模型", async () => {
@@ -756,11 +797,14 @@ test("模型引用按基础引用解析", () => {
   assert.equal(resolveModel([ALPHA], "provider-a/alpha")?.id, "alpha")
 })
 
-test("模型配置布局在窄终端切换单栏，并保留 Variant 面板宽度", () => {
+test("模型配置布局在窄终端切换单栏，并把宽度优先留给模型列表", () => {
   assert.equal(modelConfigLayoutFor(120, 32).split, true)
-  assert.equal(modelConfigLayoutFor(120, 32).variantWidth, 38)
+  assert.equal(modelConfigLayoutFor(120, 32).variantWidth, 34)
+  assert.equal(modelConfigLayoutFor(160, 32).variantWidth, 34)
+  assert.equal(modelConfigLayoutFor(100, 32).split, true)
+  assert.equal(modelConfigLayoutFor(100, 32).variantWidth, 30)
   assert.equal(modelConfigLayoutFor(80, 24).split, false)
-  assert.equal(modelConfigLayoutFor(80, 24).variantWidth, 32)
+  assert.equal(modelConfigLayoutFor(80, 24).variantWidth, 74)
   assert.equal(modelConfigLayoutFor(40, 12).minimal, true)
   assert.equal(roleLabel("primary"), "PRIMARY")
   assert.equal(roleLabel("subagent"), "SUBAGENT")
@@ -811,11 +855,9 @@ test("清除覆盖后面板重新计算为原生或 Agent 配置", () => {
   assert.equal(configured.sourceLabel, "Agent 配置")
 })
 
-test("区域切换在无 Variant 时停留在模型列表", () => {
-  assert.equal(nextRegion("models", true), "variants")
-  assert.equal(nextRegion("variants", true), "models")
-  assert.equal(nextRegion("models", false), "models")
-  assert.equal(nextRegion("variants", false), "models")
+test("区域切换始终可在模型列表与详情/Variant 之间往返", () => {
+  assert.equal(nextRegion("models"), "variants")
+  assert.equal(nextRegion("variants"), "models")
 })
 
 test("状态与权限语义色保持克制：自定义、拒绝、询问突出，原生继承与允许中性", () => {
@@ -840,10 +882,11 @@ test("搜索过滤后选中项落到可见模型，无结果时不保留不可�
   assert.equal(firstVisibleRef([], "provider-b/beta"), undefined)
 })
 
-test("设置行只在空查询下可选，搜索时不拦截空格输入", () => {
+test("设置行只在空查询且有 Agent 时可选", () => {
   assert.equal(settingsRowVisible(""), true)
   assert.equal(settingsRowVisible("   "), true)
   assert.equal(settingsRowVisible("qa"), false)
+  assert.equal(settingsRowVisible("", { hasAgents: false }), false)
 })
 
 test("默认代理设置通过 RPC 保存并返回新状态", async () => {
@@ -866,4 +909,137 @@ test("启动读取默认代理失败时面板显示告警", async () => {
   if (result.kind === "ready") {
     assert.match(result.data.warning ?? "", /默认代理设置读取失败/)
   }
+})
+
+test("终端宽度按显示单元格计算，中文与省略号不会撑破行", () => {
+  assert.equal(displayWidth("Agent"), 5)
+  assert.equal(displayWidth("团队管理"), 8)
+  assert.equal(displayWidth("🚀"), 2)
+  assert.equal(clipText("Agent Team", 7), "Agent …")
+  assert.equal(clipText("团队管理", 5), "团队…")
+})
+
+test("长模型名保留首词与版本尾词，避免丢失辨识信息", () => {
+  assert.equal(clipModelName("DeepSeek V4.1 Flash 1017", 40), "DeepSeek V4.1 Flash 1017")
+  assert.equal(clipModelName("DeepSeek V4.1 Flash 1017", 21), "DeepSeek … Flash 1017")
+  assert.equal(clipModelName("DeepSeek V4.1 Flash 1017", 16), "DeepSeek … 1017")
+  assert.equal(clipModelName("deepseek-v4.1-flash-1017", 18), "deepseek … 1017")
+  assert.equal(clipModelName("provider/model", 8), "provide…")
+})
+
+test("Agent 行按生产宽度展示 Provider，空间不足时优先保留模型名", () => {
+  const parts = { provider: "OpenCode Go", model: "DeepSeek V4.1 Flash 1017", variant: "high" }
+  // 120/160 列终端的列表行宽：48 - 7 = 41。
+  const wide = fitModelParts(parts, 41)
+  assert.equal(wide.provider, "OpenCode Go")
+  assert.equal(wide.variant, "high")
+  assert.equal(wide.model, "DeepSeek … V4.1 1017")
+
+  // 100 列终端：38 - 7 = 31，Provider 让位，模型名完整。
+  const medium = fitModelParts(parts, 31)
+  assert.equal(medium.provider, undefined)
+  assert.equal(medium.model, "DeepSeek V4.1 Flash 1017")
+  assert.equal(medium.variant, "high")
+
+  // 单栏 80 列：完整显示三段。
+  const single = fitModelParts(parts, 67)
+  assert.equal(single.provider, "OpenCode Go")
+  assert.equal(single.model, "DeepSeek V4.1 Flash 1017")
+  assert.equal(single.variant, "high")
+
+  // 100 列短模型：即使模型预算不足 16 格，只要实际放得下仍展示 Provider。
+  const short = fitModelParts({ provider: "OpenAI", model: "GPT-5.6 Cyber", variant: "high" }, 31)
+  assert.equal(short.provider, "OpenAI")
+  assert.equal(short.model, "GPT-5.6 Cyber")
+  assert.equal(short.variant, "high")
+})
+
+test("只有用户改动选择后才进入待保存，未配置时使用独立状态", () => {
+  assert.deepEqual(
+    selectionState({ selectedRef: "provider-a/alpha", dirty: false }),
+    { hasCurrent: false, modelChanged: false, variantChanged: false, pending: false },
+  )
+  assert.deepEqual(
+    selectionState({ selectedRef: "provider-a/alpha", dirty: true }),
+    { hasCurrent: false, modelChanged: false, variantChanged: false, pending: false },
+  )
+  assert.deepEqual(
+    selectionState({
+      currentBase: "provider-a/alpha",
+      selectedRef: "provider-a/alpha",
+      dirty: false,
+    }),
+    { hasCurrent: true, modelChanged: false, variantChanged: false, pending: false },
+  )
+  assert.deepEqual(
+    selectionState({
+      currentBase: "provider-a/alpha",
+      currentVariant: "high",
+      selectedRef: "provider-a/alpha",
+      variant: "low",
+      dirty: true,
+    }),
+    { hasCurrent: true, modelChanged: false, variantChanged: true, pending: true },
+  )
+  assert.deepEqual(
+    selectionState({
+      currentBase: "provider-a/alpha",
+      selectedRef: "provider-a/alpha",
+      dirty: true,
+    }),
+    { hasCurrent: true, modelChanged: false, variantChanged: false, pending: false },
+  )
+  assert.deepEqual(
+    selectionState({
+      currentBase: "provider-a/alpha",
+      selectedRef: "provider-b/beta",
+      dirty: true,
+    }),
+    { hasCurrent: true, modelChanged: true, variantChanged: false, pending: true },
+  )
+})
+
+test("恢复后同一基础模型会重新同步当前 Variant", () => {
+  const model = { ...ALPHA, variants: [{ id: "high" }, { id: "low" }] }
+  assert.equal(variantForSelection(model, "provider-a/alpha", "high", "provider-a/alpha"), "high")
+  assert.equal(variantForSelection(model, "provider-a/alpha", "max", "provider-a/alpha"), undefined)
+  assert.equal(variantForSelection(model, "provider-a/alpha", "high", "provider-b/beta"), undefined)
+  assert.equal(variantForSelection(model, undefined, undefined, "provider-a/alpha"), undefined)
+})
+
+test("配置来源同时给出短标签与详情徽标", () => {
+  assert.equal(dashboardAgent("orchestrator").configTag, "原生")
+  assert.equal(dashboardAgent("orchestrator").configBadge, "原生")
+  assert.equal(dashboardAgent("general").configTag, "继承")
+
+  const team = dashboardAgent("qa", { qa: "provider-a/alpha#high" })
+  assert.equal(team.configTag, "团队")
+  assert.equal(team.configBadge, "团队覆盖")
+
+  const configured = buildDashboardGroups(
+    inputs([{ id: "reviewer", name: "Reviewer", mode: "subagent", model: { id: "beta", providerID: "provider-b" } }]),
+    {},
+    [ALPHA, BETA],
+    PROVIDERS,
+  )[0]!.agents[0]!
+  assert.equal(configured.configTag, "Agent")
+  assert.equal(configured.configBadge, "Agent 配置")
+})
+
+test("模型目录信息用于详情展示，缺失价格时不编造", () => {
+  assert.equal(formatContextWindow(128000), "128K")
+  assert.equal(formatContextWindow(1000000), "1M")
+  assert.equal(formatContextWindow(2000000), "2M")
+  assert.equal(formatContextWindow(0), "-")
+  assert.equal(formatModelPrice(ALPHA), undefined)
+  const priced = {
+    ...ALPHA,
+    cost: [{ input: 0.05, output: 0.2, cache: { read: 0, write: 0 } }],
+    limit: { context: 128000, output: 8192 },
+  }
+  assert.equal(formatModelPrice(priced as never), "输入 $0.05/1M · 输出 $0.2/1M")
+  assert.equal(
+    formatModelPrice({ ...priced, cost: [{ input: 0, output: 0, cache: { read: 0, write: 0 } }] } as never),
+    "免费",
+  )
 })

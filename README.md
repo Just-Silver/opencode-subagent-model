@@ -9,7 +9,8 @@
 
 - **零配置团队**：安装即获得 Orchestrator 主代理与 QA、Reviewer 子代理，复用内置 `general`、`explore`。
 - **按 Agent 覆盖模型**：只影响指定的子代理，其余 Agent 继续使用 OpenCode 原生选择。
-- **可视化管理**：`/team` 面板查看角色、模型来源与完整 System Prompt，并直接改模型与变体。
+- **可视化管理**：`/team` 面板查看角色、模型来源与完整 System Prompt，并直接改模型与变体；
+  宽终端双栏、窄终端单栏，列表紧凑展示配置来源与模型。
 - **随时可逆**：清除团队覆盖后回到 Agent 配置或 OpenCode 原生选择。
 - **失败可见**：模型不可用或读取失败都明确报错，不静默回退。
 
@@ -29,7 +30,8 @@ opencode plugin add @justsilver/opencode-team
 1. 安装并完全重启 OpenCode。
 2. 输入 `/` 选择 `/team`，或在命令面板搜索「Agent 团队与模型」。
 3. 用方向键选一个子代理（如 QA），按 `Enter` 打开模型配置。
-4. 选择模型；如果该模型有变体，先按 `Enter` 选思考等级，再按 `Enter` 保存。
+4. 选择模型；如果该模型有变体，先按 `Enter` 选思考等级，再按 `Enter` 保存。单栏布局下第一次
+   `Enter` 先打开右侧详情，再按 `Enter` 保存。
 5. 之后 Orchestrator 派发子代理时，被配置的 Agent 会自动使用团队模型。
 
 ## 团队 Agent
@@ -54,7 +56,7 @@ Orchestrator 不会自动成为默认主代理；用 OpenCode 的 Agent 切换�
   `ESC` 返回或关闭。
 - 模型配置按 Provider 分组，`←`/`→` 与 `Tab` 切换区域和变体，`Enter` 保存，`Ctrl+R` 恢复原生。
 - 模型列表按 `Ctrl+F` 收藏当前模型，收藏项置顶显示；收藏全局共享，与 `/models` 的收藏互相独立。
-- 列表顶部「默认代理」行选中后按 `空格` 切换：开启后新会话默认使用 Orchestrator；
+- 面板顶部「默认代理」设置行选中后按 `空格` 切换：开启后新会话默认使用 Orchestrator；
   用户配置的 `default_agent` 仍优先。
 - 模型设置全局共享、重启保留；主代理模型只读，由 OpenCode 会话选择。
 - 窄终端自动切换为单栏布局。

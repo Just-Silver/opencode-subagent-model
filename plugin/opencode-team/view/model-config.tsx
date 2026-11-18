@@ -19,14 +19,22 @@ import {
 
 import {
   buildModelRef,
+  clipModelName,
+  clipText,
+  displayWidth,
   firstVisibleRef,
+  formatContextWindow,
+  formatModelPrice,
   modelConfigLayoutFor,
   modelGroups,
   modelRefOf,
   nextRegion,
   parseModelRef,
+  providerLabel,
   resolveModel,
   roleLabel,
+  selectionState,
+  variantForSelection,
   variantsFor,
   type ConfigRegion,
   type DashboardAgent,
@@ -38,15 +46,17 @@ import {
   ConfirmBar,
   Divider,
   FeedbackBar,
+  GroupHeader,
   Hints,
-  providerTitleColor,
-  rowBackground,
+  Legend,
+  panelRowBackground,
+  panelRowMarker,
   rowForeground,
-  rowMarker,
   rowSecondary,
   scrollbarOptions,
+  SearchBar,
   selectedRowAccent,
-  statusTone,
+  ViewHeader,
   type Hint,
   type KeymapLayer,
   type Theme,
@@ -121,10 +131,13 @@ export function ModelConfigView(props: ModelConfigProps) {
   const [variantCursor, setVariantCursor] = createSignal(
     initialVariant === undefined ? 0 : initialVariants.indexOf(initialVariant) + 1,
   )
+  const [dirty, setDirty] = createSignal(false)
   const [query, setQuery] = createSignal("")
   const [focus, setFocus] = createSignal<Focus>("models")
   const [saving, setSaving] = createSignal(false)
   const [saveFailed, setSaveFailed] = createSignal(false)
+  const [action, setAction] = createSignal<"save" | "restore">("save")
+  const [searchFocused, setSearchFocused] = createSignal(true)
   const [pendingRestore, setPendingRestore] = createSignal(false)
   let disposed = false
 
@@ -142,11 +155,33 @@ export function ModelConfigView(props: ModelConfigProps) {
     ...variants().map((id) => ({ id, label: id })),
   ])
 
+  const currentBase = () => current()?.baseRef
+  const selection = createMemo(() =>
+    selectionState({
+      ...(currentBase() === undefined ? {} : { currentBase: currentBase()! }),
+      ...(current()?.variant === undefined ? {} : { currentVariant: current()!.variant! }),
+      selectedRef: selectedRef(),
+      ...(variant() === undefined ? {} : { variant: variant()! }),
+      dirty: dirty(),
+    }),
+  )
+  const hasCurrent = () => selection().hasCurrent
+  const modelIsCurrent = () => hasCurrent() && selectedRef() === currentBase()
+  const pending = () => selection().pending
+  const differs = () => selection().modelChanged || selection().variantChanged
+  const currentVariantLabel = () => current()?.variant ?? "默认"
+
   const pendingLabel = () => {
     const model = selectedModel()
-    if (model === undefined) return "—"
+    if (model === undefined) return "-"
     return variant() === undefined ? `${model.name} · 默认` : `${model.name} · ${variant()}`
   }
+
+  const listWidth = () =>
+    layout().split
+      ? layout().contentWidth - 1 - layout().variantWidth
+      : layout().contentWidth
+  const listContentWidth = () => listWidth() - 2
 
   let modelScroll: ScrollBoxRenderable | undefined
   let variantScroll: ScrollBoxRenderable | undefined
@@ -159,7 +194,11 @@ export function ModelConfigView(props: ModelConfigProps) {
   createEffect(() => {
     const list = flatModels()
     const next = firstVisibleRef(list, selectedRef())
-    if (next !== undefined && next !== selectedRef()) setSelectedRef(next)
+    if (next !== undefined && next !== selectedRef()) {
+      // 搜索过滤导致原选择不可见时的自动落点不是用户选择，不应继承待保存标记。
+      setSelectedRef(next)
+      setDirty(false)
+    }
   })
 
   createEffect(
@@ -167,28 +206,27 @@ export function ModelConfigView(props: ModelConfigProps) {
       selectedRef,
       (ref) => {
         const model = resolveModel(props.models, ref)
-        const available = variantsFor(model)
         const currentValue = current()
-        const next =
-          currentValue?.baseRef === ref &&
-          currentValue.variant !== undefined &&
-          available.includes(currentValue.variant)
-            ? currentValue.variant
-            : undefined
+        const next = variantForSelection(
+          model,
+          currentValue?.baseRef,
+          currentValue?.variant,
+          ref,
+        )
         setVariant(next)
-        setVariantCursor(next === undefined ? 0 : available.indexOf(next) + 1)
+        setVariantCursor(next === undefined ? 0 : variantsFor(model).indexOf(next) + 1)
         setSaveFailed(false)
       },
       { defer: true },
     ),
   )
 
-  createEffect(() => {
-    // 当前模型没有 Variant 时，不把焦点留在无法操作的第二栏。
-    if (focus() === "variants" && variants().length === 0) setFocus("models")
-  })
-
   createEffect(on(selectedRef, (ref) => ensureModelVisible(ref)))
+  createEffect(
+    on(selectedRef, () => {
+      if (variantScroll !== undefined && !variantScroll.isDestroyed) variantScroll.scrollTo(0)
+    }),
+  )
   createEffect(on(query, () => ensureModelVisible(selectedRef())))
   createEffect(on(variantCursor, (index) => ensureVariantVisible(index)))
   // 收藏切换会把选中行移到 FAVORITES 或移回 Provider 组；选中项没变，但位置可能已在视口外。
@@ -219,6 +257,12 @@ export function ModelConfigView(props: ModelConfigProps) {
     if (searchInput === undefined || searchInput.isDestroyed) return
     searchInput.focus()
     searchInput.cursorOffset = searchInput.value.length
+    setSearchFocused(true)
+  }
+
+  function blurSearchInput(): void {
+    if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.blur()
+    setSearchFocused(false)
   }
 
   function scheduleFocusSearch(): void {
@@ -269,7 +313,7 @@ export function ModelConfigView(props: ModelConfigProps) {
   }
 
   function cycleRegion(): void {
-    setFocus(nextRegion(focus(), variants().length > 0))
+    setFocus(nextRegion(focus()))
   }
 
   function focusModels(): void {
@@ -277,7 +321,22 @@ export function ModelConfigView(props: ModelConfigProps) {
   }
 
   function focusVariants(): void {
-    if (variants().length > 0) setFocus("variants")
+    setFocus("variants")
+  }
+
+  /** 保存/恢复后当前值可能在同一基础模型下换了 Variant，需要回填本地选择。 */
+  function syncVariantToCurrent(): void {
+    const value = current()
+    if (value?.baseRef !== selectedRef()) return
+    const model = resolveModel(props.models, selectedRef())
+    const next = variantForSelection(model, value.baseRef, value.variant, selectedRef())
+    setVariant(next)
+    setVariantCursor(next === undefined ? 0 : variantsFor(model).indexOf(next) + 1)
+  }
+
+  function selectModel(ref: string): void {
+    if (ref !== selectedRef()) setDirty(true)
+    setSelectedRef(ref)
   }
 
   function moveModel(delta: number): void {
@@ -285,7 +344,7 @@ export function ModelConfigView(props: ModelConfigProps) {
     if (list.length === 0) return
     const index = list.findIndex((model) => modelRefOf(model) === selectedRef())
     const next = index < 0 ? 0 : (index + delta + list.length) % list.length
-    setSelectedRef(modelRefOf(list[next]!))
+    selectModel(modelRefOf(list[next]!))
   }
 
   function setVariantAt(index: number): void {
@@ -293,13 +352,18 @@ export function ModelConfigView(props: ModelConfigProps) {
     const row = rows[index]
     if (row === undefined) return
     setVariantCursor(index)
+    if (row.id !== variant()) setDirty(true)
     setVariant(row.id)
     setSaveFailed(false)
     ensureVariantVisible(index)
   }
 
   function moveVariant(delta: number): void {
-    if (variants().length === 0) return
+    // 无 Variant 时右侧是只读详情；↑↓ 继续在模型间移动，避免焦点卡住。
+    if (variants().length === 0) {
+      moveModel(delta)
+      return
+    }
     const rows = variantRows()
     const next = (variantCursor() + delta + rows.length) % rows.length
     setVariantAt(next)
@@ -309,7 +373,7 @@ export function ModelConfigView(props: ModelConfigProps) {
     if (focus() === "variants" && variants().length > 0) setVariantAt(0)
     else {
       const list = flatModels()
-      if (list.length > 0) setSelectedRef(modelRefOf(list[0]!))
+      if (list.length > 0) selectModel(modelRefOf(list[0]!))
     }
   }
 
@@ -317,12 +381,12 @@ export function ModelConfigView(props: ModelConfigProps) {
     if (focus() === "variants" && variants().length > 0) setVariantAt(variantRows().length - 1)
     else {
       const list = flatModels()
-      if (list.length > 0) setSelectedRef(modelRefOf(list[list.length - 1]!))
+      if (list.length > 0) selectModel(modelRefOf(list[list.length - 1]!))
     }
   }
 
   function page(delta: number): void {
-    if (focus() === "variants") {
+    if (focus() === "variants" && variants().length > 0) {
       const scroll = variantScroll
       if (scroll !== undefined && !scroll.isDestroyed) scroll.scrollBy(delta * 5)
       return
@@ -336,8 +400,8 @@ export function ModelConfigView(props: ModelConfigProps) {
       void restore()
       return
     }
-    // 有 Variant 时，先在模型列表按 Enter 进入思考等级面板，确认等级后再保存。
-    if (focus() === "models" && variants().length > 0) {
+    // 单栏时先进入右侧查看模型信息/Variant；双栏有 Variant 时也先聚焦 Variant。
+    if (focus() === "models" && (!split() || variants().length > 0)) {
       setFocus("variants")
       return
     }
@@ -356,14 +420,17 @@ export function ModelConfigView(props: ModelConfigProps) {
     }
     setSaving(true)
     setSaveFailed(false)
+    setAction("save")
     props.notify({ tone: "info", message: "正在保存模型配置…" })
-    if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.blur()
+    blurSearchInput()
     try {
       const result = await props.onSave(buildModelRef(selectedRef(), variant()))
       if (disposed) return
       setSaving(false)
       if (result.saved) {
         setSaveFailed(false)
+        setDirty(false)
+        syncVariantToCurrent()
         scheduleFocusSearch()
       } else {
         setSaveFailed(true)
@@ -392,7 +459,7 @@ export function ModelConfigView(props: ModelConfigProps) {
     }
     setSaveFailed(false)
     setPendingRestore(true)
-    if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.blur()
+    blurSearchInput()
   }
 
   async function restore(): Promise<void> {
@@ -400,6 +467,7 @@ export function ModelConfigView(props: ModelConfigProps) {
     setPendingRestore(false)
     setSaving(true)
     setSaveFailed(false)
+    setAction("restore")
     props.notify({ tone: "info", message: "正在恢复原生模型选择…" })
     try {
       const result = await props.onRestore()
@@ -407,6 +475,8 @@ export function ModelConfigView(props: ModelConfigProps) {
       setSaving(false)
       if (result.saved) {
         setSaveFailed(false)
+        setDirty(false)
+        syncVariantToCurrent()
         scheduleFocusSearch()
       } else {
         setSaveFailed(true)
@@ -578,28 +648,29 @@ export function ModelConfigView(props: ModelConfigProps) {
 
   return (
     <box flexGrow={1} minHeight={0} flexDirection="column">
-      <box flexDirection="row" justifyContent="space-between" gap={2} flexShrink={0}>
-        <box flexDirection="row" gap={1}>
-          <text fg={theme().text.base} attributes={TextAttributes.BOLD}>
-            Agent Team
-          </text>
-          <text fg={theme().text.muted}>›</text>
-          <text fg={theme().text.base}>模型配置</text>
+      <ViewHeader
+        theme={theme()}
+        section="模型配置"
+        right={pendingRestore() ? "ESC 取消" : "ESC 返回"}
+      />
+
+      <Show when={!layout().minimal}>
+        <box paddingTop={layout().dense ? 0 : 1} flexShrink={0}>
+          <AgentCard
+            theme={theme()}
+            agent={props.agent}
+            compact={layout().compact || layout().dense}
+          />
         </box>
-        <text fg={theme().text.muted}>
-          {pendingRestore() ? "ESC 取消" : "ESC 返回"}
-        </text>
-      </box>
+      </Show>
 
-      <box paddingTop={1} flexShrink={0}>
-        <AgentCard theme={theme()} agent={props.agent} compact={layout().compact} />
-      </box>
-
-      <box paddingTop={1} flexShrink={0}>
-        <SearchBox
+      <box paddingTop={layout().minimal || layout().dense ? 0 : 1} flexShrink={0}>
+        <SearchBar
           theme={theme()}
-          query={query()}
-          focused={!pendingRestore()}
+          value={query()}
+          focused={searchFocused() && !pendingRestore()}
+          placeholder="模型 / Provider / ID…"
+          right={`共 ${flatModels().length} 个模型`}
           onFocus={() => {
             if (!pendingRestore()) focusSearchInput()
           }}
@@ -622,28 +693,54 @@ export function ModelConfigView(props: ModelConfigProps) {
         </box>
       </Show>
 
-      <box flexGrow={1} minHeight={0} paddingTop={1} flexDirection="row">
+      <box flexGrow={1} minHeight={0} paddingTop={layout().dense ? 0 : 1} flexDirection="row">
         <Show when={showModels()}>
-          <ModelList
-            theme={theme()}
-            groups={groups()}
-            selectedRef={selectedRef()}
-            currentBase={current()?.baseRef}
-            compact={layout().compact}
-            onSelect={(ref) => {
-              if (pendingRestore()) return
-              setSelectedRef(ref)
-              setFocus("models")
-            }}
-            onRef={(ref, node) => modelNodes.set(ref, node)}
-            onScrollRef={(value) => {
-              modelScroll = value
-              ensureModelVisible(selectedRef())
-            }}
-          />
+          <box
+            width={split() ? listWidth() : undefined}
+            flexGrow={split() ? undefined : 1}
+            flexShrink={0}
+            minWidth={0}
+            minHeight={0}
+            flexDirection="column"
+            border={true}
+            borderStyle="rounded"
+            borderColor={
+              focus() === "models" ? selectedRowAccent(theme()) : theme().border.base
+            }
+            backgroundColor={
+              focus() === "models"
+                ? theme().background.raised.base
+                : theme().background.base
+            }
+            title={focus() === "models" ? "› 模型列表" : "模型列表"}
+            titleColor={
+              focus() === "models" ? selectedRowAccent(theme()) : theme().text.muted
+            }
+          >
+            <ModelList
+              theme={theme()}
+              groups={groups()}
+              providers={props.providers}
+              selectedRef={selectedRef()}
+              currentBase={currentBase()}
+              pending={pending()}
+              focused={focus() === "models"}
+              width={listContentWidth()}
+              onSelect={(ref) => {
+                if (pendingRestore()) return
+                selectModel(ref)
+                setFocus("models")
+              }}
+              onRef={(ref, node) => modelNodes.set(ref, node)}
+              onScrollRef={(value) => {
+                modelScroll = value
+                ensureModelVisible(selectedRef())
+              }}
+            />
+          </box>
         </Show>
         <Show when={split()}>
-          <box width={1} flexShrink={0} backgroundColor={theme().border.base} />
+          <box width={1} flexShrink={0} />
         </Show>
         <Show when={showVariants()}>
           <VariantPane
@@ -651,12 +748,23 @@ export function ModelConfigView(props: ModelConfigProps) {
             model={selectedModel()}
             variants={variantRows()}
             cursor={variantCursor()}
-            pending={pendingLabel()}
+            variant={variant()}
+            currentVariant={current()?.variant}
+            modelIsCurrent={modelIsCurrent()}
+            hasCurrent={hasCurrent()}
+            pending={pending()}
+            differs={differs()}
+            pendingLabel={pendingLabel()}
+            currentLabel={currentVariantLabel()}
+            currentModelLabel={props.agent.modelLabel}
             focused={focus() === "variants"}
             empty={flatModels().length === 0}
             width={split() ? layout().variantWidth : undefined}
             saving={saving()}
             failed={saveFailed()}
+            action={action()}
+            canRestore={props.currentOverride !== undefined}
+            tight={layout().dense}
             onSelect={(index) => {
               if (pendingRestore()) return
               setVariantAt(index)
@@ -688,6 +796,9 @@ export function ModelConfigView(props: ModelConfigProps) {
       <Foot
         theme={theme()}
         minimal={layout().minimal}
+        dense={layout().dense}
+        wide={layout().contentWidth >= 106}
+        split={layout().split}
         focus={focus()}
         saving={saving()}
         confirming={pendingRestore()}
@@ -704,93 +815,78 @@ function AgentCard(props: {
 }) {
   return (
     <box
-      backgroundColor={props.theme.background.raised.high}
+      backgroundColor={props.theme.background.raised.base}
       border={["left"]}
       borderColor={selectedRowAccent(props.theme)}
       paddingLeft={1}
       paddingRight={1}
       paddingTop={props.compact ? 0 : 1}
       paddingBottom={props.compact ? 0 : 1}
-      flexDirection="row"
-      justifyContent="space-between"
-      gap={2}
+      flexDirection="column"
     >
-      <box flexDirection="column" flexGrow={1} minWidth={0}>
-        <box flexDirection="row" gap={1}>
-          <text fg={props.theme.text.base} attributes={TextAttributes.BOLD}>
-            {props.agent.name}
-          </text>
-          <Show when={props.compact}>
-            <text flexGrow={1} overflow="hidden" wrapMode="none">
-              <span style={{ fg: props.theme.text.muted }}>当前：</span><span style={{ fg: props.theme.text.base }}>{props.agent.modelLabel}</span>
-            </text>
-          </Show>
+      <box flexDirection="row" justifyContent="space-between" gap={2}>
+        <text
+          flexGrow={1}
+          overflow="hidden"
+          wrapMode="none"
+          fg={props.theme.text.base}
+          attributes={TextAttributes.BOLD}
+        >
+          {props.agent.name}
+        </text>
+        <box flexDirection="row" gap={1} flexShrink={0}>
+          <Badge theme={props.theme} text={roleLabel(props.agent.mode)} tone="neutral" />
+          <Badge
+            theme={props.theme}
+            text={props.agent.configBadge}
+            tone={props.agent.configTone}
+          />
         </box>
-        <Show when={!props.compact}>
-          <text overflow="hidden" wrapMode="none">
-            <span style={{ fg: props.theme.text.muted }}>当前模型：</span><span style={{ fg: props.theme.text.base }}>{props.agent.modelLabel}</span><span style={{ fg: props.theme.text.muted }}> · {props.agent.sourceLabel}</span>
-          </text>
-        </Show>
       </box>
-      <box flexDirection="row" gap={1} flexShrink={0}>
-        <Badge theme={props.theme} text={roleLabel(props.agent.mode)} tone="neutral" />
-        <Badge
-          theme={props.theme}
-          text={props.agent.statusLabel}
-          tone={statusTone(props.agent.status)}
-        />
-      </box>
-    </box>
-  )
-}
-
-function SearchBox(props: {
-  readonly theme: Theme
-  readonly query: string
-  readonly focused: boolean
-  readonly onFocus: () => void
-  readonly onInput: (value: string) => void
-  readonly inputRef: (value: InputRenderable) => void
-}) {
-  return (
-    <box
-      flexDirection="row"
-      gap={1}
-      paddingLeft={1}
-      paddingRight={1}
-      backgroundColor={
-        props.focused ? props.theme.background.formfield.focused : props.theme.background.raised.base
-      }
-      onMouseDown={props.onFocus}
-    >
-      <text fg={props.focused ? props.theme.text.formfield.focused : props.theme.text.muted}>
-        搜索
+      <text overflow="hidden" wrapMode="none">
+        <span style={{ fg: props.theme.text.muted }}>当前：</span>
+        <span style={{ fg: props.theme.text.base }}>{props.agent.modelLabel}</span>
+        <span style={{ fg: props.theme.text.muted }}> · {props.agent.sourceLabel}</span>
       </text>
-      <input
-        flexGrow={1}
-        value={props.query}
-        onInput={props.onInput}
-        placeholder="输入以搜索模型 / Provider / ID…"
-        placeholderColor={props.theme.text.muted}
-        focusedBackgroundColor={props.theme.background.formfield.focused}
-        focusedTextColor={props.theme.text.formfield.focused}
-        cursorColor={props.theme.text.formfield.focused}
-        ref={props.inputRef}
-      />
     </box>
   )
 }
 
 function ModelList(props: {
   readonly theme: Theme
-  readonly groups: readonly { providerID: string; providerName: string; models: readonly ModelInfo[] }[]
+  readonly groups: readonly { providerID: string; providerName: string; models: readonly ModelInfo[]; favoriteGroup?: boolean }[]
+  readonly providers: readonly ProviderInfo[]
   readonly selectedRef: string
   readonly currentBase?: string
-  readonly compact: boolean
+  readonly pending: boolean
+  readonly focused: boolean
+  readonly width: number
   readonly onSelect: (ref: string) => void
   readonly onRef: (ref: string, node: Renderable) => void
   readonly onScrollRef: (value: ScrollBoxRenderable) => void
 }) {
+  const providerOf = (model: ModelInfo, group: { favoriteGroup?: boolean }) =>
+    group.favoriteGroup === true
+      ? clipText(providerLabel(props.providers, model.providerID), 14)
+      : undefined
+
+  const stateOf = (ref: string) => {
+    if (ref === props.currentBase) return { text: "当前", color: selectedRowAccent(props.theme) }
+    if (ref === props.selectedRef && props.pending) {
+      return { text: "待保存", color: props.theme.text.feedback.warning.base }
+    }
+    return undefined
+  }
+
+  const nameWidth = (model: ModelInfo, group: { favoriteGroup?: boolean }) => {
+    const provider = providerOf(model, group)
+    const state = stateOf(modelRefOf(model))
+    let used = 0
+    if (provider !== undefined) used += 1 + displayWidth(provider)
+    if (state !== undefined) used += 1 + displayWidth(state.text)
+    return Math.max(6, props.width - 5 - used)
+  }
+
   return (
     <box flexGrow={1} minWidth={0} minHeight={0}>
       <Show
@@ -812,77 +908,64 @@ function ModelList(props: {
             {(group, index) => (
               <box flexDirection="column">
                 <Show when={index() > 0}>
-                  <box paddingTop={1}>
-                    <Divider theme={props.theme} />
-                  </box>
+                  <box height={1} />
                 </Show>
-                <box
-                  flexDirection="row"
-                  justifyContent="space-between"
-                  gap={2}
-                  paddingLeft={1}
-                  paddingRight={1}
-                >
-                  <text
-                    flexGrow={1}
-                    overflow="hidden"
-                    wrapMode="none"
-                    fg={providerTitleColor(props.theme)}
-                    attributes={TextAttributes.BOLD}
-                  >
-                    {group.providerName.toUpperCase()}
-                  </text>
-                  <text flexShrink={0} fg={props.theme.text.muted}>
-                    {group.models.length}
-                  </text>
-                </box>
+                <GroupHeader
+                  theme={props.theme}
+                  title={group.favoriteGroup === true ? "FAVORITES" : group.providerName.toUpperCase()}
+                  count={group.models.length}
+                  accent
+                />
                 <For each={group.models}>
                   {(model) => {
                     const ref = modelRefOf(model)
                     const active = () => ref === props.selectedRef
-                    const current = () => ref === props.currentBase
+                    const state = () => stateOf(ref)
+                    const provider = () => providerOf(model, group)
                     return (
                       <box
-                        flexDirection="column"
-                        paddingLeft={2}
+                        flexDirection="row"
+                        gap={1}
+                        paddingLeft={1}
                         paddingRight={1}
-                        backgroundColor={rowBackground(props.theme, active())}
+                        backgroundColor={panelRowBackground(
+                          props.theme,
+                          active(),
+                          props.focused,
+                        )}
                         onMouseUp={() => props.onSelect(ref)}
                         ref={(node: Renderable) => props.onRef(ref, node)}
                       >
-                        <box flexDirection="row" gap={1}>
-                          <text
-                            flexShrink={0}
-                            fg={rowMarker(props.theme, active())}
-                          >
-                            {active() ? "▌" : " "}
-                          </text>
-                          <text
-                            flexGrow={1}
-                            overflow="hidden"
-                            wrapMode="none"
-                            fg={rowForeground(props.theme)}
-                            attributes={active() ? TextAttributes.BOLD : undefined}
-                          >
-                            {model.name || model.id}
-                          </text>
-                          <Show when={current()}>
-                            <text
-                              flexShrink={0}
-                              fg={selectedRowAccent(props.theme)}
-                            >
-                              当前
+                        <text
+                          flexShrink={0}
+                          fg={panelRowMarker(props.theme, active(), props.focused)}
+                        >
+                          {active() ? "|" : " "}
+                        </text>
+                        <text
+                          flexGrow={1}
+                          overflow="hidden"
+                          wrapMode="none"
+                          fg={rowForeground(props.theme)}
+                          attributes={
+                            active() && props.focused ? TextAttributes.BOLD : undefined
+                          }
+                        >
+                          {clipModelName(model.name || model.id, nameWidth(model, group))}
+                        </text>
+                        <Show when={provider()}>
+                          {(value) => (
+                            <text flexShrink={0} fg={rowSecondary(props.theme, active())}>
+                              {value()}
                             </text>
-                          </Show>
-                        </box>
-                        <Show when={!props.compact}>
-                          <text
-                            paddingLeft={2}
-                            wrapMode="word"
-                            fg={rowSecondary(props.theme, active())}
-                          >
-                            {ref}
-                          </text>
+                          )}
+                        </Show>
+                        <Show when={state()}>
+                          {(value) => (
+                            <text flexShrink={0} fg={value().color}>
+                              {value().text}
+                            </text>
+                          )}
                         </Show>
                       </box>
                     )
@@ -902,35 +985,61 @@ function VariantPane(props: {
   readonly model?: ModelInfo
   readonly variants: readonly VariantOption[]
   readonly cursor: number
-  readonly pending: string
+  readonly variant?: string
+  readonly currentVariant?: string
+  readonly modelIsCurrent: boolean
+  readonly hasCurrent: boolean
+  readonly pending: boolean
+  readonly differs: boolean
+  readonly pendingLabel: string
+  readonly currentLabel: string
+  readonly currentModelLabel: string
   readonly focused: boolean
   readonly empty: boolean
   readonly width?: number
   readonly saving: boolean
   readonly failed: boolean
+  readonly action: "save" | "restore"
+  readonly canRestore: boolean
+  readonly tight: boolean
   readonly onSelect: (index: number) => void
   readonly onRef: (index: number, node: Renderable) => void
   readonly onScrollRef: (value: ScrollBoxRenderable) => void
 }) {
   const hasChoices = () => props.variants.length > 1
+  const price = () => formatModelPrice(props.model)
+
+  const currentState = (option: VariantOption) =>
+    props.modelIsCurrent && (option.id ?? undefined) === (props.currentVariant ?? undefined)
+
+  const pendingState = (option: VariantOption) =>
+    props.pending &&
+    (option.id ?? undefined) === (props.variant ?? undefined) &&
+    !currentState(option)
+
   return (
     <box
       width={props.width}
       flexGrow={props.width === undefined ? 1 : undefined}
       minHeight={0}
       flexDirection="column"
-      paddingLeft={1}
-      paddingRight={1}
-      border={["left"]}
+      border={true}
+      borderStyle="rounded"
       borderColor={
         props.focused ? selectedRowAccent(props.theme) : props.theme.border.base
       }
-      backgroundColor={props.theme.background.raised.base}
+      backgroundColor={
+        props.focused ? props.theme.background.raised.base : props.theme.background.base
+      }
+      title={props.focused ? "› 思考等级" : "思考等级"}
+      titleColor={
+        props.focused ? selectedRowAccent(props.theme) : props.theme.text.muted
+      }
     >
       <Show
         when={props.model}
         fallback={
-          <box paddingTop={1}>
+          <box paddingLeft={1} paddingTop={1}>
             <text fg={props.theme.text.muted}>
               {props.empty ? "没有匹配的模型。" : "从左侧选择模型。"}
             </text>
@@ -938,79 +1047,168 @@ function VariantPane(props: {
         }
       >
         {(model) => (
-          <>
-            <box flexShrink={0}>
-              <text fg={props.theme.text.base} attributes={TextAttributes.BOLD} wrapMode="word">
-                {model().name || model().id}
-              </text>
-              <text fg={props.theme.text.muted} wrapMode="none" overflow="hidden">
-                {modelRefOf(model())}
-              </text>
-            </box>
-            <Divider theme={props.theme} />
-            <text fg={props.theme.text.muted} attributes={TextAttributes.BOLD}>
-              思考等级 / Variant
-            </text>
-            <Show
-              when={hasChoices()}
-              fallback={
-                <text fg={props.theme.text.muted} wrapMode="word">
-                  该模型不提供 Variant；保存时只写模型引用。
+          <scrollbox
+            flexGrow={1}
+            minHeight={0}
+            verticalScrollbarOptions={scrollbarOptions(props.theme)}
+            horizontalScrollbarOptions={{ visible: false }}
+            ref={props.onScrollRef}
+          >
+            <box flexDirection="column" paddingLeft={1} paddingRight={1}>
+              <box flexShrink={0} flexDirection="column">
+                <text
+                  fg={props.focused ? props.theme.text.base : props.theme.text.muted}
+                  attributes={props.focused ? TextAttributes.BOLD : undefined}
+                  wrapMode="word"
+                >
+                  {model().name || model().id}
                 </text>
-              }
-            >
-              <scrollbox
-                flexGrow={1}
-                minHeight={0}
-                verticalScrollbarOptions={scrollbarOptions(props.theme)}
-                horizontalScrollbarOptions={{ visible: false }}
-                ref={props.onScrollRef}
+                <text fg={props.theme.text.muted} wrapMode="char">
+                  {modelRefOf(model())}
+                </text>
+                <Show when={!props.tight}>
+                  <text fg={props.theme.text.muted} wrapMode="word">
+                    上下文 {formatContextWindow(model().limit?.context ?? 0)}
+                  </text>
+                  <Show when={price()}>
+                    {(value) => (
+                      <text fg={props.theme.text.muted} wrapMode="word">
+                        {value()}
+                      </text>
+                    )}
+                  </Show>
+                </Show>
+              </box>
+
+              <Divider theme={props.theme} />
+
+              <box flexDirection="row" justifyContent="space-between" gap={1} flexShrink={0}>
+                <text fg={props.theme.text.muted} attributes={TextAttributes.BOLD}>
+                  Variant
+                </text>
+                <text
+                  flexShrink={0}
+                  fg={
+                    props.modelIsCurrent
+                      ? selectedRowAccent(props.theme)
+                      : props.theme.text.muted
+                  }
+                >
+                  {props.modelIsCurrent
+                    ? `当前 ${props.currentLabel}`
+                    : props.hasCurrent
+                      ? "未生效"
+                      : "未设置"}
+                </text>
+              </box>
+
+              <Show
+                when={hasChoices()}
+                fallback={
+                  <text fg={props.theme.text.muted} wrapMode="word">
+                    该模型不提供 Variant；保存时只写模型引用。
+                  </text>
+                }
               >
-                <For each={props.variants}>
-                  {(option, index) => {
-                    const active = () => index() === props.cursor
-                    return (
-                      <box
-                        flexDirection="row"
-                        gap={1}
-                        paddingLeft={1}
-                        paddingRight={1}
-                        backgroundColor={rowBackground(props.theme, active())}
-                        onMouseUp={() => props.onSelect(index())}
-                        ref={(node: Renderable) => props.onRef(index(), node)}
-                      >
-                        <text
-                          flexShrink={0}
-                          fg={rowMarker(props.theme, active())}
+                <box flexDirection="column">
+                  <For each={props.variants}>
+                    {(option, index) => {
+                      const active = () => index() === props.cursor
+                      const current = () => currentState(option)
+                      const pending = () => pendingState(option)
+                      return (
+                        <box
+                          flexDirection="row"
+                          gap={1}
+                          paddingLeft={1}
+                          paddingRight={1}
+                          backgroundColor={panelRowBackground(
+                            props.theme,
+                            active(),
+                            props.focused,
+                          )}
+                          onMouseUp={() => props.onSelect(index())}
+                          ref={(node: Renderable) => props.onRef(index(), node)}
                         >
-                          {active() ? "▌" : " "}
-                        </text>
-                        <text
-                          flexGrow={1}
-                          overflow="hidden"
-                          wrapMode="none"
-                          fg={rowForeground(props.theme)}
-                          attributes={active() ? TextAttributes.BOLD : undefined}
-                        >
-                          {option.label}
-                        </text>
-                      </box>
-                    )
-                  }}
-                </For>
-              </scrollbox>
-            </Show>
-            <Divider theme={props.theme} />
-            <text fg={props.theme.text.muted} wrapMode="word">
-              待保存 <span style={{ fg: props.theme.text.base }}>{props.pending}</span>
-            </text>
-            <Show when={props.saving}>
-              <text fg={props.theme.text.feedback.warning.base}>处理中…</text>
-            </Show>
-            <Show when={props.failed}>
-              <text fg={props.theme.text.feedback.error.base}>操作失败，可重试。</text>
-            </Show>
-          </>
+                          <text
+                            flexShrink={0}
+                            fg={panelRowMarker(props.theme, active(), props.focused)}
+                          >
+                            {active() ? "|" : " "}
+                          </text>
+                          <text
+                            flexGrow={1}
+                            overflow="hidden"
+                            wrapMode="none"
+                            fg={rowForeground(props.theme)}
+                            attributes={
+                              active() && props.focused ? TextAttributes.BOLD : undefined
+                            }
+                          >
+                            {option.label}
+                          </text>
+                          <Show when={current() || pending()}>
+                            <text
+                              flexShrink={0}
+                              fg={
+                                current()
+                                  ? selectedRowAccent(props.theme)
+                                  : props.theme.text.feedback.warning.base
+                              }
+                            >
+                              {current() ? "当前" : "待保存"}
+                            </text>
+                          </Show>
+                        </box>
+                      )
+                    }}
+                  </For>
+                </box>
+              </Show>
+
+              <Divider theme={props.theme} />
+              <text
+                fg={
+                  props.pending || !props.hasCurrent
+                    ? props.theme.text.feedback.warning.base
+                    : props.theme.text.muted
+                }
+                attributes={TextAttributes.BOLD}
+              >
+                {props.pending
+                  ? "待应用"
+                  : !props.hasCurrent
+                    ? "未设置覆盖"
+                    : props.differs
+                      ? "当前生效"
+                      : "当前配置"}
+              </text>
+              <text fg={props.theme.text.base} wrapMode="word">
+                {props.pending
+                  ? props.pendingLabel
+                  : !props.hasCurrent
+                    ? "选择模型后按 Enter 保存"
+                    : props.differs
+                      ? props.currentModelLabel
+                      : "已与当前生效配置一致"}
+              </text>
+              <Show when={props.pending || !props.hasCurrent || props.differs}>
+                <text fg={props.theme.text.muted} wrapMode="word">
+                  Enter 保存{props.canRestore ? " · Ctrl+R 恢复原生" : ""}
+                </text>
+              </Show>
+              <Show when={props.saving}>
+                <text fg={props.theme.text.feedback.warning.base}>
+                  {props.action === "restore" ? "正在恢复…" : "正在保存…"}
+                </text>
+              </Show>
+              <Show when={props.failed}>
+                <text fg={props.theme.text.feedback.error.base}>
+                  {props.action === "restore" ? "恢复失败，可重试。" : "保存失败，可重试。"}
+                </text>
+              </Show>
+            </box>
+          </scrollbox>
         )}
       </Show>
     </box>
@@ -1020,6 +1218,9 @@ function VariantPane(props: {
 function Foot(props: {
   readonly theme: Theme
   readonly minimal: boolean
+  readonly dense: boolean
+  readonly wide: boolean
+  readonly split: boolean
   readonly focus: Focus
   readonly saving: boolean
   readonly confirming: boolean
@@ -1029,12 +1230,13 @@ function Foot(props: {
     if (props.saving) return "处理中…"
     if (props.confirming) return "确认"
     if (props.focus === "models" && props.hasVariants) return "思考等级"
+    if (props.focus === "models" && !props.split) return "详情"
     return "保存"
   }
   const hints = (): Hint[] => {
     if (props.confirming) {
       return [
-        { key: "Enter", label: "确认" },
+        { key: "Enter", label: "确认", emphasis: true },
         { key: "ESC", label: "取消" },
       ]
     }
@@ -1042,17 +1244,17 @@ function Foot(props: {
       return [
         { key: "↑↓", label: "选择" },
         { key: "←→", label: "切换" },
-        { key: "输入", label: "搜索" },
-        { key: "Enter", label: enterLabel() },
+        { key: "Enter", label: enterLabel(), emphasis: true },
         { key: "ESC", label: "返回" },
       ]
     }
     if (props.focus === "variants") {
       return [
-        { key: "↑↓", label: "思考等级" },
+        ...(props.hasVariants
+          ? [{ key: "↑↓", label: "思考等级" }]
+          : [{ key: "↑↓", label: "模型" }]),
         { key: "←→", label: "切换" },
-        { key: "输入", label: "搜索" },
-        { key: "Enter", label: enterLabel() },
+        { key: "Enter", label: enterLabel(), emphasis: true },
         { key: "Ctrl+F", label: "收藏" },
         { key: "Ctrl+R", label: "恢复原生" },
         { key: "ESC", label: "返回" },
@@ -1061,8 +1263,7 @@ function Foot(props: {
     return [
       { key: "↑↓", label: "模型" },
       { key: "←→", label: "切换" },
-      { key: "输入", label: "搜索" },
-      { key: "Enter", label: enterLabel() },
+      { key: "Enter", label: enterLabel(), emphasis: true },
       { key: "Ctrl+F", label: "收藏" },
       { key: "Ctrl+R", label: "恢复原生" },
       { key: "ESC", label: "返回" },
@@ -1071,11 +1272,25 @@ function Foot(props: {
   return (
     <box
       flexShrink={0}
-      border={["top"]}
+      border={props.minimal || props.dense ? undefined : ["top"]}
       borderColor={props.theme.border.base}
-      paddingTop={1}
+      paddingTop={props.minimal || props.dense ? 0 : 1}
+      flexDirection="row"
+      justifyContent="space-between"
+      gap={2}
+      flexWrap="wrap"
     >
       <Hints theme={props.theme} hints={hints()} />
+      <Show when={props.wide && !props.minimal && !props.confirming}>
+        <Legend
+          theme={props.theme}
+          items={[
+            { value: "当前", label: "生效", tone: "accent" },
+            { value: "|", label: "选中", tone: "neutral" },
+            { value: "待保存", label: "未提交", tone: "warning" },
+          ]}
+        />
+      </Show>
     </box>
   )
 }

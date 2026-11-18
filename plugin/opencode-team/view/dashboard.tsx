@@ -16,6 +16,7 @@ import {
   buildDashboardGroups,
   feedbackDismissMs,
   filterDashboardGroups,
+  fitModelParts,
   layoutFor,
   roleLabel,
   SETTINGS_ID,
@@ -31,19 +32,21 @@ import type { ModelSelectionResult } from "./team.ts"
 import {
   Badge,
   ConfirmBar,
-  Divider,
   effectTone,
   FeedbackBar,
+  GroupHeader,
   Hints,
   rowBackground,
   rowForeground,
   rowMarker,
   rowSecondary,
   scrollbarOptions,
-  Section,
+  SearchBar,
+  SectionHeading,
   selectedRowAccent,
-  statusTone,
+  ToggleChip,
   toneColor,
+  ViewHeader,
   type KeymapLayer,
   type Theme,
 } from "./ui.tsx"
@@ -97,6 +100,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
   const [feedback, setFeedback] = createSignal<Feedback>()
   const [pendingRestore, setPendingRestore] = createSignal<DashboardAgent>()
   const [restoring, setRestoring] = createSignal(false)
+  const [searchFocused, setSearchFocused] = createSignal(true)
   let disposed = false
   let feedbackTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -115,9 +119,10 @@ export function TeamDashboard(props: TeamDashboardProps) {
   const allGroups = () => buildDashboardGroups(props.agents, overrides(), models(), props.providers)
   const groups = () => filterDashboardGroups(allGroups(), query())
   const agentRows = () => groups().flatMap((group) => group.agents)
-  const settingsVisible = () => settingsRowVisible(query())
+  const settingsVisible = () =>
+    settingsRowVisible(query(), { hasAgents: agentRows().length > 0 })
   const rowIDs = () => [
-    ...(settingsVisible() && agentRows().length > 0 ? [SETTINGS_ID] : []),
+    ...(settingsVisible() ? [SETTINGS_ID] : []),
     ...agentRows().map((agent) => agent.id),
   ]
   const selected = () => agentRows().find((agent) => agent.id === selectedID())
@@ -145,21 +150,22 @@ export function TeamDashboard(props: TeamDashboardProps) {
   let scrollTimer: ReturnType<typeof setTimeout> | undefined
   const rowNodes = new Map<string, Renderable>()
 
-  let searchFocused = true
   // 设置行选中时空格同时被输入框接收；切换后恢复进入设置行前的查询，避免留下空格。
   let settingsQuery = ""
 
   function focusSearch(): void {
     if (pendingRestore() !== undefined || restoring()) return
     if (searchInput === undefined || searchInput.isDestroyed) return
+    // 搜索框获得焦点时把选中移回 Agent 行，避免“空格 切换”提示与实际输入冲突。
+    if (selectedID() === SETTINGS_ID) setSelectedID(agentRows()[0]?.id ?? "")
     searchInput.focus()
     searchInput.cursorOffset = searchInput.value.length
-    searchFocused = true
+    setSearchFocused(true)
   }
 
   function blurSearch(): void {
     if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.blur()
-    searchFocused = false
+    setSearchFocused(false)
   }
 
   function scheduleFocusSearch(): void {
@@ -171,8 +177,8 @@ export function TeamDashboard(props: TeamDashboardProps) {
     on(
       selectedID,
       (id) => {
-        if (id !== undefined) ensureVisible(id)
-        detailScroll?.scrollTo(0)
+        if (id !== undefined && id !== SETTINGS_ID) ensureVisible(id)
+        if (detailScroll !== undefined && !detailScroll.isDestroyed) detailScroll.scrollTo(0)
         // 设置行选中时移走搜索焦点，空格才是开关而不是空白字符。
         if (id === SETTINGS_ID) {
           settingsQuery = query()
@@ -227,7 +233,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
 
   function page(delta: number): void {
     const target = layout().split || pane() === "detail" ? detailScroll : listScroll
-    target?.scrollBy(delta * 10)
+    if (target !== undefined && !target.isDestroyed) target.scrollBy(delta * 10)
   }
 
   async function choose(): Promise<void> {
@@ -286,7 +292,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
     if (restoring()) return
     setFeedback(undefined)
     setPendingRestore(agent)
-    if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.blur()
+    blurSearch()
   }
 
   async function confirmRestoreNow(): Promise<void> {
@@ -409,7 +415,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
         bind: "space",
         enabled: () =>
           selectedID() === SETTINGS_ID &&
-          !searchFocused &&
+          !searchFocused() &&
           pendingRestore() === undefined &&
           !restoring(),
         run: () => void toggleDefaultAgentNow(),
@@ -443,6 +449,13 @@ export function TeamDashboard(props: TeamDashboardProps) {
   const showList = () => split() || pane() === "list"
   const showDetail = () => split() || pane() === "detail"
   const agent = () => selected()
+  const escapeLabel = () => {
+    if (pendingRestore() !== undefined) return "ESC 取消"
+    if (!split() && pane() === "detail") return "ESC 返回"
+    return "ESC 关闭"
+  }
+  const modelLineWidth = () =>
+    (split() ? layout().listWidth : layout().contentWidth) - 7
 
   return (
     <box
@@ -493,16 +506,11 @@ export function TeamDashboard(props: TeamDashboardProps) {
           </Show>
         }
       >
-        <Header
+        <ViewHeader
           theme={theme()}
-          layout={layout()}
-          pane={pane()}
-          confirming={pendingRestore() !== undefined}
+          section="团队管理"
+          right={escapeLabel()}
         />
-        <Show when={!layout().minimal}>
-          <box height={1} />
-          <Divider theme={theme()} />
-        </Show>
 
         <Banners
           theme={theme()}
@@ -512,10 +520,25 @@ export function TeamDashboard(props: TeamDashboardProps) {
           warning={props.warning}
         />
 
-        <box paddingTop={1} paddingBottom={1} paddingLeft={1} paddingRight={1} flexShrink={0}>
-          <SearchField
+        <Show when={settingsVisible()}>
+          <box paddingTop={layout().dense ? 0 : 1} flexShrink={0}>
+            <DefaultAgentBar
+              theme={theme()}
+              selected={selectedID() === SETTINGS_ID}
+              enabled={defaultAgent()}
+              compact={layout().minimal || layout().compact}
+              onToggle={() => void toggleDefaultAgentNow()}
+            />
+          </box>
+        </Show>
+
+        <box paddingTop={layout().minimal || layout().dense ? 0 : 1} flexShrink={0}>
+          <SearchBar
             theme={theme()}
-            query={query()}
+            value={query()}
+            focused={searchFocused()}
+            placeholder="Agent 名称 / 角色 / 模型…"
+            right={`${agentRows().length} 个 Agent`}
             inputRef={(value) => {
               searchInput = value
               scheduleFocusSearch()
@@ -525,18 +548,15 @@ export function TeamDashboard(props: TeamDashboardProps) {
           />
         </box>
 
-        <box flexGrow={1} minHeight={0} flexDirection="row">
+        <box flexGrow={1} minHeight={0} flexDirection="row" paddingTop={layout().dense ? 0 : 1}>
           <Show when={showList()}>
             <ListPane
               theme={theme()}
               groups={groups()}
               selectedID={selectedID()}
-              settingsVisible={settingsVisible()}
-              settingsSelected={selectedID() === SETTINGS_ID}
-              defaultAgent={defaultAgent()}
-              onToggleSettings={() => void toggleDefaultAgentNow()}
-              compact={layout().compact}
               width={split() ? layout().listWidth : undefined}
+              modelLineWidth={modelLineWidth()}
+              compact={layout().compact}
               onSelect={(id) => {
                 if (pendingRestore() !== undefined) return
                 setSelectedID(id)
@@ -580,6 +600,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
         <Footer
           theme={theme()}
           minimal={layout().minimal}
+          dense={layout().dense}
           split={split()}
           pane={pane()}
           agent={agent()}
@@ -592,30 +613,53 @@ export function TeamDashboard(props: TeamDashboardProps) {
   )
 }
 
-function Header(props: {
+/** 顶部的独立设置行：只影响新会话默认主代理，不改变 Orchestrator 本身。 */
+function DefaultAgentBar(props: {
   readonly theme: Theme
-  readonly layout: ReturnType<typeof layoutFor>
-  readonly pane: "list" | "detail"
-  readonly confirming: boolean
+  readonly selected: boolean
+  readonly enabled: boolean
+  readonly compact: boolean
+  readonly onToggle: () => void
 }) {
-  const escapeLabel = () => {
-    if (props.confirming) return "ESC 取消"
-    if (!props.layout.split && props.pane === "detail") return "ESC 返回"
-    return "ESC 关闭"
-  }
   return (
-    <box flexDirection="column" flexShrink={0}>
+    <box
+      flexDirection="column"
+      flexShrink={0}
+      backgroundColor={
+        props.selected ? props.theme.background.raised.high : props.theme.background.raised.base
+      }
+      border={["left"]}
+      borderColor={props.selected ? selectedRowAccent(props.theme) : props.theme.border.base}
+      paddingLeft={1}
+      paddingRight={1}
+      onMouseUp={props.onToggle}
+    >
       <box flexDirection="row" justifyContent="space-between" gap={2}>
-        <box flexDirection="row" gap={2}>
-          <text fg={props.theme.text.base} attributes={TextAttributes.BOLD}>
-            Agent Team
+        <box flexDirection="row" gap={1} minWidth={0}>
+          <text
+            flexShrink={0}
+            fg={rowForeground(props.theme)}
+            attributes={TextAttributes.BOLD}
+          >
+            默认代理
           </text>
-          <text fg={props.theme.text.muted}>团队管理</text>
+          <text flexShrink={0} fg={props.theme.text.muted}>
+            Orchestrator
+          </text>
         </box>
-        <text fg={props.theme.text.muted}>{escapeLabel()}</text>
+        <ToggleChip theme={props.theme} on={props.enabled} />
       </box>
-      <Show when={!props.layout.minimal}>
-        <text fg={props.theme.text.muted}>模型策略只覆盖子代理；默认代理可单独设置</text>
+      <Show when={!props.compact}>
+        <text
+          fg={props.selected ? props.theme.text.base : props.theme.text.muted}
+          overflow="hidden"
+          wrapMode="none"
+        >
+          {props.enabled ? "新会话默认使用 Orchestrator" : "新会话默认代理跟随 OpenCode 配置"}
+          <span style={{ fg: props.theme.text.muted }}>
+            {props.selected ? " · 空格 切换" : " · 选中后空格切换"}
+          </span>
+        </text>
       </Show>
     </box>
   )
@@ -662,12 +706,9 @@ function ListPane(props: {
   readonly theme: Theme
   readonly groups: readonly DashboardGroup[]
   readonly selectedID?: string
-  readonly settingsVisible: boolean
-  readonly settingsSelected: boolean
-  readonly defaultAgent: boolean
-  readonly onToggleSettings: () => void
-  readonly compact: boolean
   readonly width?: number
+  readonly modelLineWidth: number
+  readonly compact: boolean
   readonly onSelect: (id: string) => void
   readonly onRef: (id: string, node: Renderable) => void
   readonly onScrollRef: (value: ScrollBoxRenderable) => void
@@ -697,56 +738,17 @@ function ListPane(props: {
           horizontalScrollbarOptions={{ visible: false }}
           ref={props.onScrollRef}
         >
-          <Show when={props.settingsVisible}>
-            <>
-              <box
-                flexDirection="column"
-                paddingLeft={1}
-                paddingRight={1}
-                backgroundColor={rowBackground(props.theme, props.settingsSelected)}
-                onMouseUp={props.onToggleSettings}
-                ref={(node: Renderable) => props.onRef(SETTINGS_ID, node)}
-              >
-                <box flexDirection="row" gap={1}>
-                  <text flexShrink={0} fg={rowMarker(props.theme, props.settingsSelected)}>
-                    {props.settingsSelected ? "▌" : " "}
-                  </text>
-                  <text
-                    flexGrow={1}
-                    fg={rowForeground(props.theme)}
-                    attributes={props.settingsSelected ? TextAttributes.BOLD : undefined}
-                  >
-                    默认代理
-                  </text>
-                  <text flexShrink={0} fg={props.theme.text.base}>
-                    Orchestrator
-                  </text>
-                  <text
-                    flexShrink={0}
-                    fg={
-                      props.defaultAgent
-                        ? toneColor(props.theme, "success")
-                        : rowSecondary(props.theme, props.settingsSelected)
-                    }
-                  >
-                    {props.defaultAgent ? "开" : "关"}
-                  </text>
-                </box>
-              </box>
-              <box height={1} />
-            </>
-          </Show>
           <For each={props.groups}>
             {(group, index) => (
               <box flexDirection="column">
-                <box paddingTop={index() === 0 ? 0 : 1} paddingLeft={1}>
-                  <text fg={props.theme.text.muted} attributes={TextAttributes.BOLD}>
-                    {group.title}
-                  </text>
-                </box>
+                <Show when={index() > 0}>
+                  <box height={1} />
+                </Show>
+                <GroupHeader theme={props.theme} title={group.title} count={group.count} />
                 <For each={group.agents}>
                   {(agent) => {
                     const active = () => agent.id === props.selectedID
+                    const parts = () => fitModelParts(agent.modelParts, props.modelLineWidth)
                     return (
                       <box
                         flexDirection="column"
@@ -758,7 +760,7 @@ function ListPane(props: {
                       >
                         <box flexDirection="row" gap={1}>
                           <text flexShrink={0} fg={rowMarker(props.theme, active())}>
-                            {active() ? "▌" : " "}
+                            {active() ? "|" : " "}
                           </text>
                           <text
                             flexGrow={1}
@@ -771,24 +773,37 @@ function ListPane(props: {
                           </text>
                           <text
                             flexShrink={0}
-                            fg={
-                              active()
-                                ? props.theme.text.base
-                                : toneColor(props.theme, statusTone(agent.status))
-                            }
+                            fg={toneColor(props.theme, agent.configTone)}
                           >
-                            {agent.statusLabel}
+                            {agent.configTag}
                           </text>
                         </box>
-                        <Show when={!props.compact && agent.status === "custom"}>
+                        <Show when={!props.compact}>
                           <box flexDirection="row" gap={1} paddingLeft={2}>
+                            <Show when={parts().provider !== undefined}>
+                              <text flexShrink={0} fg={rowSecondary(props.theme, active())}>
+                                {parts().provider}
+                              </text>
+                              <text flexShrink={0} fg={props.theme.text.faint}>
+                                ·
+                              </text>
+                            </Show>
                             <text
                               flexGrow={1}
-                              wrapMode="word"
+                              overflow="hidden"
+                              wrapMode="none"
                               fg={rowSecondary(props.theme, active())}
                             >
-                              {agent.modelLabel}
+                              {parts().model}
                             </text>
+                            <Show when={parts().variant !== undefined}>
+                              <text flexShrink={0} fg={props.theme.text.faint}>
+                                ·
+                              </text>
+                              <text flexShrink={0} fg={rowSecondary(props.theme, active())}>
+                                {parts().variant}
+                              </text>
+                            </Show>
                           </box>
                         </Show>
                       </box>
@@ -814,43 +829,85 @@ function DetailPane(props: {
 }) {
   return (
     <box flexGrow={1} minWidth={0} minHeight={0} paddingLeft={2}>
-      <Show when={props.settingsSelected}>
-        <box flexDirection="column" gap={1} paddingTop={1} paddingRight={1}>
-          <text fg={props.theme.text.base} attributes={TextAttributes.BOLD}>
-            默认代理
-          </text>
-          <text fg={selectedRowAccent(props.theme)} attributes={TextAttributes.BOLD}>
-            Orchestrator
-          </text>
-          <text fg={props.theme.text.muted} wrapMode="word">
-            开启后，新会话默认使用 Orchestrator；已有会话的代理不受影响。
-          </text>
-          <text fg={props.theme.text.muted} wrapMode="word">
-            用户配置了 default_agent 时，以该配置为准。
-          </text>
-          <text fg={props.theme.text.muted} wrapMode="word">
-            当前：{props.defaultAgent ? "开" : "关"} · 选中后按空格切换
-          </text>
-        </box>
-      </Show>
-      <Show when={!props.settingsSelected}>
-      <Show
-        when={props.agent}
-        fallback={
-          <box paddingTop={1}>
-            <text fg={props.theme.text.muted}>没有可显示的 Agent。</text>
+      <Show when={props.settingsSelected} fallback={<AgentDetail {...props} />}>
+        <scrollbox
+          flexGrow={1}
+          minHeight={0}
+          verticalScrollbarOptions={scrollbarOptions(props.theme)}
+          horizontalScrollbarOptions={{ visible: false }}
+          ref={props.onScrollRef}
+        >
+          <box flexDirection="column" gap={1} paddingTop={1} paddingRight={1}>
+            <box flexDirection="row" justifyContent="space-between" gap={2}>
+              <box flexDirection="column">
+                <text fg={props.theme.text.muted}>默认代理</text>
+                <text fg={props.theme.text.base} attributes={TextAttributes.BOLD}>
+                  Orchestrator
+                </text>
+              </box>
+              <ToggleChip theme={props.theme} on={props.defaultAgent} />
+            </box>
+            <box
+              flexDirection="column"
+              backgroundColor={props.theme.background.raised.base}
+              border={["left"]}
+              borderColor={selectedRowAccent(props.theme)}
+              paddingLeft={1}
+              paddingRight={1}
+            >
+              <text fg={props.theme.text.base} attributes={TextAttributes.BOLD}>
+                {props.defaultAgent ? "新会话默认使用 Orchestrator" : "新会话默认代理跟随 OpenCode 配置"}
+              </text>
+              <text fg={props.theme.text.muted} wrapMode="word">
+                开启后，新会话默认代理为 Orchestrator；已有会话的代理保持不变。
+              </text>
+            </box>
+            <text fg={props.theme.text.muted} wrapMode="word">
+              该开关不会删除或禁用 Orchestrator：它仍在 PRIMARY 分组中，可以继续查看角色、配置模型。
+            </text>
+            <text fg={props.theme.text.muted} wrapMode="word">
+              用户配置了 default_agent 时，以该配置为准。
+            </text>
+            <text fg={props.theme.text.base} wrapMode="word">
+              空格 切换 · 当前：
+              <span style={{ fg: props.defaultAgent ? toneColor(props.theme, "success") : props.theme.text.muted }}>
+                {props.defaultAgent ? "开启" : "关闭"}
+              </span>
+            </text>
           </box>
-        }
-      >
-        {(agent) => (
-          <scrollbox
-            flexGrow={1}
-            minHeight={0}
-            verticalScrollbarOptions={scrollbarOptions(props.theme)}
-            horizontalScrollbarOptions={{ visible: false }}
-            ref={props.onScrollRef}
-          >
-            <box flexDirection="column" gap={1} paddingRight={1}>
+        </scrollbox>
+      </Show>
+    </box>
+  )
+}
+
+function AgentDetail(props: {
+  readonly theme: Theme
+  readonly agent?: DashboardAgent
+  readonly settingsSelected: boolean
+  readonly defaultAgent: boolean
+  readonly compact: boolean
+  readonly onScrollRef: (value: ScrollBoxRenderable) => void
+}) {
+  return (
+    <Show
+      when={props.agent}
+      fallback={
+        <box paddingTop={1}>
+          <text fg={props.theme.text.muted}>没有可显示的 Agent。</text>
+        </box>
+      }
+    >
+      {(agent) => (
+        <scrollbox
+          flexGrow={1}
+          minHeight={0}
+          verticalScrollbarOptions={scrollbarOptions(props.theme)}
+          horizontalScrollbarOptions={{ visible: false }}
+          ref={props.onScrollRef}
+        >
+          <box flexDirection="column" gap={1} paddingRight={1}>
+            <box flexDirection="column">
               <box flexDirection="row" justifyContent="space-between" gap={2}>
                 <text
                   flexGrow={1}
@@ -865,96 +922,118 @@ function DetailPane(props: {
                   <Badge theme={props.theme} text={roleLabel(agent().mode)} tone="neutral" />
                   <Badge
                     theme={props.theme}
-                    text={agent().statusLabel}
-                    tone={statusTone(agent().status)}
+                    text={agent().configBadge}
+                    tone={agent().configTone}
                   />
                 </box>
               </box>
+              <text fg={props.theme.text.muted} overflow="hidden" wrapMode="none">
+                {agent().id}
+              </text>
+            </box>
 
-              <box
-                flexDirection="column"
-                backgroundColor={props.theme.background.raised.high}
-                border={["left"]}
-                borderColor={selectedRowAccent(props.theme)}
-                paddingLeft={1}
-                paddingRight={1}
-                paddingTop={1}
-                paddingBottom={1}
-              >
-                <text fg={selectedRowAccent(props.theme)} attributes={TextAttributes.BOLD}>
-                  当前模型
-                </text>
-                <text fg={props.theme.text.base} attributes={TextAttributes.BOLD} wrapMode="word">
-                  {agent().modelLabel}
-                </text>
+            <box
+              flexDirection="column"
+              backgroundColor={props.theme.background.raised.base}
+              border={["left"]}
+              borderColor={selectedRowAccent(props.theme)}
+              paddingLeft={1}
+              paddingRight={1}
+              paddingTop={1}
+              paddingBottom={1}
+            >
+              <text fg={props.theme.text.muted} attributes={TextAttributes.BOLD}>
+                当前模型
+              </text>
+              <text fg={props.theme.text.base} attributes={TextAttributes.BOLD} wrapMode="word">
+                {agent().modelLabel}
+              </text>
+              <text fg={props.theme.text.muted} wrapMode="word">
+                来源：{agent().sourceLabel} · 变体：{agent().variantLabel}
+              </text>
+              <Show when={agent().source !== "none" && agent().effectiveModel !== undefined}>
                 <text fg={props.theme.text.muted} wrapMode="word">
-                  来源：{agent().sourceLabel}
-                  {agent().source === "none"
-                    ? ""
-                    : ` · ${agent().teamModel ?? agent().hostModel ?? ""}`}
-                  {" · "}变体：{agent().variantLabel}
-                </text>
-                <Show when={agent().mode === "primary"}>
-                  <text fg={props.theme.text.muted} wrapMode="word">
-                    主代理模型由 OpenCode 会话选择，团队策略不能覆盖；此处只读展示。
-                  </text>
-                </Show>
-              </box>
-
-              <Show when={!props.compact}>
-                <text fg={props.theme.text.muted} wrapMode="word">
-                  {agent().description ?? "宿主未提供角色说明。"}
+                  {agent().effectiveModel} ·{" "}
+                  {agent().source === "team" ? "团队覆盖优先于 Agent 配置" : "来自 Agent 配置"}
                 </text>
               </Show>
-
-              <Divider theme={props.theme} />
-
-              <Section theme={props.theme} title="权限 / PERMISSIONS">
-                <text fg={props.theme.text.muted} wrapMode="word">允许 <span style={{ fg: toneColor(props.theme, "neutral") }}>{agent().permissions.allow}</span> · 询问 <span style={{ fg: props.theme.text.feedback.warning.base }}>{agent().permissions.ask}</span> · 拒绝 <span style={{ fg: props.theme.text.feedback.error.base }}>{agent().permissions.deny}</span>（共 {agent().permissions.total} 条生效规则）</text>
+              <Show when={agent().mode === "primary"}>
                 <text fg={props.theme.text.muted} wrapMode="word">
-                  默认：
-                  {agent().permissions.defaultEffect === undefined
-                    ? "未设置（宿主按 ask 处理）"
-                    : `*/* ${effectLabel(agent().permissions.defaultEffect!)}`}
+                  主代理模型由 OpenCode 会话选择，团队策略不能覆盖；此处只读展示。
                 </text>
-                <For each={agent().permissions.highlights}>
-                  {(rule) => (
-                    <text fg={toneColor(props.theme, effectTone(rule.effect))} wrapMode="word">
-                      {effectLabel(rule.effect)} {rule.action} {rule.resource}
-                    </text>
-                  )}
-                </For>
-                <text fg={props.theme.text.muted} wrapMode="word">
-                  规则效果摘要，不代表沙箱；Shell 仍可能写文件。完整合并顺序见宿主策略。
-                </text>
-              </Section>
-
-              <Section theme={props.theme} title="SYSTEM PROMPT · 只读">
-                <Show
-                  when={agent().prompt.available}
-                  fallback={
-                    <text fg={props.theme.text.feedback.warning.base} wrapMode="word">
-                      {agent().prompt.reason}
-                    </text>
-                  }
-                >
-                  <text fg={props.theme.text.base} wrapMode="word">
-                    {agent().prompt.text}
-                  </text>
-                </Show>
-              </Section>
+              </Show>
             </box>
-          </scrollbox>
-        )}
-      </Show>
-      </Show>
-    </box>
+
+            <SectionHeading theme={props.theme} title="角色职责" first />
+            <text fg={props.theme.text.muted} wrapMode="word">
+              {agent().description ?? "宿主未提供角色说明。"}
+            </text>
+
+            <SectionHeading theme={props.theme} title="权限 / PERMISSIONS" />
+            <text fg={props.theme.text.muted} wrapMode="word">
+              允许 <span style={{ fg: toneColor(props.theme, "neutral") }}>{agent().permissions.allow}</span>
+              {" · "}询问{" "}
+              <span style={{ fg: props.theme.text.feedback.warning.base }}>
+                {agent().permissions.ask}
+              </span>
+              {" · "}拒绝{" "}
+              <span style={{ fg: props.theme.text.feedback.error.base }}>
+                {agent().permissions.deny}
+              </span>
+              {"（共 "}
+              {agent().permissions.total} 条生效规则）
+            </text>
+            <text fg={props.theme.text.muted} wrapMode="word">
+              默认：
+              {agent().permissions.defaultEffect === undefined
+                ? "未设置（宿主按 ask 处理）"
+                : `*/* ${effectLabel(agent().permissions.defaultEffect!)}`}
+            </text>
+            <For each={agent().permissions.highlights}>
+              {(rule) => (
+                <text fg={toneColor(props.theme, effectTone(rule.effect))} wrapMode="word">
+                  {effectLabel(rule.effect)} {rule.action} {rule.resource}
+                </text>
+              )}
+            </For>
+            <Show when={!props.compact}>
+              <text fg={props.theme.text.muted} wrapMode="word">
+                规则效果摘要，不代表沙箱；Shell 仍可能写文件。完整合并顺序见宿主策略。
+              </text>
+            </Show>
+
+            <SectionHeading theme={props.theme} title="System Prompt（只读）" />
+            <Show
+              when={agent().prompt.available}
+              fallback={
+                <text fg={props.theme.text.feedback.warning.base} wrapMode="word">
+                  {agent().prompt.reason}
+                </text>
+              }
+            >
+              <box
+                border={["left"]}
+                borderColor={props.theme.border.base}
+                paddingLeft={1}
+                paddingRight={1}
+                flexDirection="column"
+              >
+                <text fg={props.theme.text.base} wrapMode="word">
+                  {agent().prompt.text}
+                </text>
+              </box>
+            </Show>
+          </box>
+        </scrollbox>
+      )}
+    </Show>
   )
 }
 
 function Footer(props: {
   readonly theme: Theme
   readonly minimal: boolean
+  readonly dense: boolean
   readonly split: boolean
   readonly pane: "list" | "detail"
   readonly agent?: DashboardAgent
@@ -970,6 +1049,21 @@ function Footer(props: {
         { key: "ESC", label: "取消" },
       ]
     }
+    // 单栏详情页的 ESC 是返回列表；设置行在详情页中选中时优先给出空格提示。
+    if (!props.split && props.pane === "detail" && props.settingsSelected) {
+      return [
+        { key: "空格", label: props.defaultAgent ? "关闭默认代理" : "开启默认代理" },
+        { key: "↑↓", label: "选择" },
+        { key: "ESC", label: "返回" },
+      ]
+    }
+    if (!props.split && props.pane === "detail") {
+      return [
+        { key: "Enter", label: enter() },
+        { key: "Ctrl+R", label: "恢复原生" },
+        { key: "ESC", label: "返回" },
+      ]
+    }
     if (props.settingsSelected) {
       return [
         { key: "↑↓", label: "选择" },
@@ -983,18 +1077,11 @@ function Footer(props: {
         { key: "ESC", label: "关闭" },
       ]
     }
-    if (!props.split && props.pane === "list") {
+    if (!props.split) {
       return [
         { key: "↑↓", label: "选择" },
         { key: "Enter", label: "详情" },
         { key: "ESC", label: "关闭" },
-      ]
-    }
-    if (!props.split) {
-      return [
-        { key: "Enter", label: enter() },
-        { key: "Ctrl+R", label: "恢复原生" },
-        { key: "ESC", label: "返回" },
       ]
     }
     return [
@@ -1007,47 +1094,11 @@ function Footer(props: {
   return (
     <box
       flexShrink={0}
-      border={["top"]}
+      border={props.minimal || props.dense ? undefined : ["top"]}
       borderColor={props.theme.border.base}
-      paddingTop={1}
+      paddingTop={props.minimal || props.dense ? 0 : 1}
     >
       <Hints theme={props.theme} hints={hints()} />
-    </box>
-  )
-}
-
-/**
- * 搜索框常驻并默认聚焦，直接输入即过滤；不再有进入/退出搜索的模式，
- * 因此列表导航只保留方向键，单字母按键都作为查询输入。
- */
-function SearchField(props: {
-  readonly query: string
-  readonly theme: Theme
-  readonly inputRef: (value: InputRenderable) => void
-  readonly onFocus: () => void
-  readonly onInput: (value: string) => void
-}) {
-  return (
-    <box
-      flexDirection="row"
-      gap={1}
-      paddingLeft={1}
-      paddingRight={1}
-      backgroundColor={props.theme.background.formfield.focused}
-      onMouseDown={props.onFocus}
-    >
-      <text fg={props.theme.text.formfield.focused}>搜索</text>
-      <input
-        flexGrow={1}
-        value={props.query}
-        onInput={props.onInput}
-        placeholder="Agent 名称 / 角色 / 模型…"
-        placeholderColor={props.theme.text.muted}
-        focusedBackgroundColor={props.theme.background.formfield.focused}
-        focusedTextColor={props.theme.text.formfield.focused}
-        cursorColor={props.theme.text.formfield.focused}
-        ref={props.inputRef}
-      />
     </box>
   )
 }

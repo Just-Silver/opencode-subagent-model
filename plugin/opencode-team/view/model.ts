@@ -44,6 +44,12 @@ export interface PermissionSummary {
   readonly highlights: readonly PermissionHighlight[]
 }
 
+export interface ModelParts {
+  readonly provider?: string
+  readonly model: string
+  readonly variant?: string
+}
+
 export interface DashboardAgent {
   readonly id: string
   readonly name: string
@@ -55,11 +61,17 @@ export interface DashboardAgent {
   readonly effectiveModel?: string
   readonly modelLabel: string
   readonly modelRefLabel?: string
+  readonly modelParts: ModelParts
   readonly variantLabel: string
   readonly status: ModelStatus
   readonly statusLabel: string
   readonly source: ModelSource
   readonly sourceLabel: string
+  /** 列表行右侧的短来源标签：团队 / Agent / 原生 / 继承。 */
+  readonly configTag: string
+  /** 详情徽标使用完整来源：团队覆盖 / Agent 配置 / 原生 / 继承。 */
+  readonly configBadge: string
+  readonly configTone: Tone
   readonly canConfigure: boolean
   readonly canRestore: boolean
   readonly prompt: PromptInfo
@@ -70,6 +82,7 @@ export interface DashboardAgent {
 export interface DashboardGroup {
   readonly key: "primary" | "subagents" | "unavailable"
   readonly title: string
+  readonly count: number
   readonly agents: readonly DashboardAgent[]
 }
 
@@ -77,8 +90,13 @@ export interface DashboardLayout {
   readonly split: boolean
   readonly compact: boolean
   readonly minimal: boolean
+  /** 24 行左右的终端：压缩卡片与底栏的固定高度，把行留给列表。 */
+  readonly dense: boolean
   readonly dialogHeight: number
+  /** 列表栏宽度；单栏布局时等于 contentWidth。 */
   readonly listWidth: number
+  /** 弹窗去掉左右内边距后可用的内容宽度。 */
+  readonly contentWidth: number
 }
 
 export const STATUS_LABELS: Readonly<Record<ModelStatus, string>> = {
@@ -91,6 +109,142 @@ export const SOURCE_LABELS: Readonly<Record<ModelSource, string>> = {
   team: "团队策略",
   agent: "Agent 配置",
   none: "无独立模型",
+}
+
+function isWideCodePoint(code: number): boolean {
+  return (
+    (code >= 0x1100 && code <= 0x115f) ||
+    (code >= 0x2e80 && code <= 0xa4cf) ||
+    (code >= 0xac00 && code <= 0xd7a3) ||
+    (code >= 0xf900 && code <= 0xfaff) ||
+    (code >= 0xfe30 && code <= 0xfe6f) ||
+    (code >= 0xff00 && code <= 0xff60) ||
+    (code >= 0xffe0 && code <= 0xffe6) ||
+    (code >= 0x1f300 && code <= 0x1f64f) ||
+    (code >= 0x1f650 && code <= 0x1f6ff) ||
+    (code >= 0x1f900 && code <= 0x1f9ff) ||
+    (code >= 0x1fa70 && code <= 0x1faff) ||
+    (code >= 0x1f1e6 && code <= 0x1f1ff)
+  )
+}
+
+/** 终端单元格宽度；只区分宽字符与半角，不依赖具体字体。 */
+export function displayWidth(text: string): number {
+  let width = 0
+  for (const char of text) {
+    const code = char.codePointAt(0)
+    if (code === undefined || code < 32) continue
+    width += isWideCodePoint(code) ? 2 : 1
+  }
+  return width
+}
+
+function charWidth(char: string): number {
+  const code = char.codePointAt(0)
+  if (code === undefined || code < 32) return 0
+  return isWideCodePoint(code) ? 2 : 1
+}
+
+/** 截断时保留 1 格省略号，避免长文本把布局撑开。 */
+export function clipText(text: string, max: number): string {
+  if (max <= 0) return ""
+  if (displayWidth(text) <= max) return text
+  if (max === 1) return "…"
+  let width = 0
+  let out = ""
+  for (const char of text) {
+    const next = charWidth(char)
+    if (width + next > max - 1) break
+    out += char
+    width += next
+  }
+  return `${out}…`
+}
+
+/**
+ * 模型名尾部常带版本号（1017、Eco），从右侧截断会丢掉最有辨识度的信息；
+ * 超出宽度时保留首词和末尾若干整词/片段，中间用省略号衔接。
+ */
+export function clipModelName(text: string, max: number): string {
+  if (displayWidth(text) <= max) return text
+  const spaced = text.trim().split(/\s+/).filter(Boolean)
+  const tokens = spaced.length >= 2 ? spaced : text.split(/[-/]/).filter(Boolean)
+  if (tokens.length < 2 || max < 10) return clipText(text, max)
+  const first = tokens[0]!
+  const head = displayWidth(first) <= max - 4 ? first : clipText(first, max - 4)
+  let remaining = max - displayWidth(head) - 3
+  if (remaining <= 0) return clipText(text, max)
+  const tail: string[] = []
+  for (let index = tokens.length - 1; index > 0; index--) {
+    const token = tokens[index]!
+    const cost = displayWidth(token) + (tail.length === 0 ? 0 : 1)
+    // 放不下的词跳过而不是终止，后面可能有更短但同样重要的版本词。
+    if (cost > remaining) continue
+    tail.unshift(token)
+    remaining -= cost
+  }
+  if (tail.length === 0) return head.endsWith("…") ? head : `${head}…`
+  return `${head} … ${tail.join(" ")}`
+}
+
+/**
+ * Agent 行第二行优先保留模型名与 Variant；Provider 必须完整，且仍能给模型留下
+ * 至少 16 格（或模型本身能完整放下）时才展示，否则整体让位，避免出现
+ * "OpenCo…" 这类无法辨认的缩写。
+ */
+export function fitModelParts(parts: ModelParts, width: number): ModelParts {
+  const usable = Math.max(1, width)
+  const variantBudget = Math.min(8, Math.max(4, usable - 12))
+  const variant =
+    usable < 12 || parts.variant === undefined || parts.variant === ""
+      ? undefined
+      : clipText(parts.variant, variantBudget)
+  const variantWidth = variant === undefined ? 0 : 3 + displayWidth(variant)
+  const baseBudget = Math.max(1, usable - variantWidth)
+  const provider = parts.provider?.trim()
+  if (provider !== undefined && provider !== "") {
+    const modelBudget = baseBudget - 3 - displayWidth(provider)
+    // 短模型能完整放下时优先保留 Provider；长模型则以至少 16 格为界。
+    if (modelBudget >= 16 || displayWidth(parts.model) <= modelBudget) {
+      return {
+        provider,
+        model: clipModelName(parts.model, modelBudget),
+        ...(variant === undefined ? {} : { variant }),
+      }
+    }
+  }
+  return {
+    model: clipModelName(parts.model, baseBudget),
+    ...(variant === undefined ? {} : { variant }),
+  }
+}
+
+/** 模型目录里的上下文窗口与价格只用于详情展示；缺失或异常时不编造数值。 */
+export function formatContextWindow(tokens: number): string {
+  if (!Number.isFinite(tokens) || tokens <= 0) return "-"
+  if (tokens >= 1_000_000) {
+    const value = tokens / 1_000_000
+    return `${Number.isInteger(value) ? value : value.toFixed(1)}M`
+  }
+  if (tokens >= 1_000) {
+    const value = tokens / 1_000
+    return `${Number.isInteger(value) ? value : value.toFixed(1)}K`
+  }
+  return String(tokens)
+}
+
+function formatPrice(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return "0"
+  return value < 1
+    ? value.toFixed(3).replace(/0+$/, "").replace(/\.$/, "")
+    : value.toFixed(2).replace(/0+$/, "").replace(/\.$/, "")
+}
+
+export function formatModelPrice(model: ModelInfo | undefined): string | undefined {
+  const cost = model?.cost?.find((entry) => entry.tier === undefined) ?? model?.cost?.[0]
+  if (cost === undefined) return undefined
+  if (cost.input === 0 && cost.output === 0) return "免费"
+  return `输入 $${formatPrice(cost.input)}/1M · 输出 $${formatPrice(cost.output)}/1M`
 }
 
 export type FeedbackTone = "info" | "success" | "warning" | "error"
@@ -123,16 +277,51 @@ export function effectTone(effect: PermissionEffect): Tone {
 export const SETTINGS_ID = "__team-default-agent__"
 
 /** 搜索时只过滤 Agent 行，设置行在空查询下才可选中，避免空格被开关拦截而无法输入。 */
-export function settingsRowVisible(query: string): boolean {
+export function settingsRowVisible(
+  query: string,
+  options: { readonly hasAgents?: boolean } = {},
+): boolean {
+  if (options.hasAgents === false) return false
   return query.trim() === ""
 }
 
 export type ConfigRegion = "models" | "variants"
 
-/** 无 Variant 的模型没有可操作的第二栏，切换区域时始终留在模型列表。 */
-export function nextRegion(region: ConfigRegion, hasVariants: boolean): ConfigRegion {
-  if (!hasVariants) return "models"
+/** 两侧都能展示信息（模型信息 / Variant），因此始终允许在区域间切换。 */
+export function nextRegion(region: ConfigRegion): ConfigRegion {
   return region === "models" ? "variants" : "models"
+}
+
+export interface SelectionState {
+  readonly hasCurrent: boolean
+  readonly modelChanged: boolean
+  readonly variantChanged: boolean
+  readonly pending: boolean
+}
+
+/**
+ * 只有用户实际改动过选择才显示“待保存”；打开面板时的自动首选项不算待保存。
+ * 没有生效配置时也不复用待保存语义，由界面显示独立的“未设置”状态。
+ */
+export function selectionState(input: {
+  readonly currentBase?: string
+  readonly currentVariant?: string
+  readonly selectedRef: string
+  readonly variant?: string
+  readonly dirty: boolean
+}): SelectionState {
+  const hasCurrent = input.currentBase !== undefined
+  const modelChanged = hasCurrent && input.selectedRef !== input.currentBase
+  const variantChanged =
+    hasCurrent &&
+    !modelChanged &&
+    (input.variant ?? undefined) !== (input.currentVariant ?? undefined)
+  return {
+    hasCurrent,
+    modelChanged,
+    variantChanged,
+    pending: input.dirty && (modelChanged || variantChanged),
+  }
 }
 
 const PROMPT_UNAVAILABLE = "宿主未为该 Agent 提供独立 System Prompt。"
@@ -194,6 +383,20 @@ export function variantsFor(model: ModelInfo | undefined): readonly string[] {
     result.push(variant.id)
   }
   return result
+}
+
+/** 只有选中模型就是当前生效模型时，才把当前 Variant 回填到本地选择。 */
+export function variantForSelection(
+  model: ModelInfo | undefined,
+  currentBase: string | undefined,
+  currentVariant: string | undefined,
+  selectedRef: string,
+): string | undefined {
+  if (currentBase === undefined || currentBase !== selectedRef) return undefined
+  const available = variantsFor(model)
+  return currentVariant !== undefined && available.includes(currentVariant)
+    ? currentVariant
+    : undefined
 }
 
 /** 搜索改变列表后，选中项必须落在可见模型上；没有可见模型时返回 undefined。 */
@@ -307,41 +510,59 @@ export function modelGroups(
   ]
 }
 
-export function modelConfigLayoutFor(width: number, height: number): ModelConfigLayout {
-  return {
-    ...layoutFor(width, height),
-    variantWidth: width >= 112 ? 38 : 32,
-  }
-}
-
 export function describeModel(
   ref: string | undefined,
   mode: AgentMode,
   models: readonly ModelInfo[],
   providers: readonly ProviderInfo[],
-): { readonly label: string; readonly variantLabel: string; readonly refLabel?: string } {
+): {
+  readonly label: string
+  readonly variantLabel: string
+  readonly refLabel?: string
+  readonly parts: ModelParts
+} {
   if (ref === undefined) {
     return {
       label: mode === "primary" ? "OpenCode 原生选择" : "继承调用方模型",
-      variantLabel: "—",
+      variantLabel: "-",
+      parts: { model: mode === "primary" ? "OpenCode 会话选择" : "继承调用方模型" },
     }
   }
   const parsed = parseModelRef(ref)
   if (parsed === undefined) {
-    return { label: `${ref}（引用格式无效）`, variantLabel: "—", refLabel: ref }
+    return {
+      label: `${ref}（引用格式无效）`,
+      variantLabel: "-",
+      refLabel: ref,
+      parts: { model: ref },
+    }
   }
   const model = models.find(
     (candidate) => candidate.providerID === parsed.providerID && candidate.id === parsed.id,
   )
   const variantLabel = parsed.variant ?? "默认（不附加变体）"
   if (model === undefined) {
-    return { label: `${ref}（当前目录不可用）`, variantLabel, refLabel: ref }
+    return {
+      label: `${ref}（当前目录不可用）`,
+      variantLabel,
+      refLabel: ref,
+      parts: {
+        provider: providerName(providers, parsed.providerID),
+        model: parsed.id,
+        ...(parsed.variant === undefined ? {} : { variant: parsed.variant }),
+      },
+    }
   }
   const base = `${providerName(providers, parsed.providerID)} / ${model.name}`
   return {
     label: parsed.variant === undefined ? base : `${base} · ${parsed.variant}`,
     variantLabel,
     refLabel: ref,
+    parts: {
+      provider: providerName(providers, parsed.providerID),
+      model: model.name || model.id,
+      ...(parsed.variant === undefined ? {} : { variant: parsed.variant }),
+    },
   }
 }
 
@@ -443,6 +664,8 @@ export function buildDashboardAgent(
     ? input.description?.trim() || undefined
     : "该 Agent 不在团队视图中；只能清除旧覆盖。"
   const name = input.name?.trim() || input.id
+  const configTag = source === "team" ? "团队" : source === "agent" ? "Agent" : STATUS_LABELS[status]
+  const configBadge = source === "team" ? "团队覆盖" : source === "agent" ? "Agent 配置" : STATUS_LABELS[status]
   const searchText = [
     input.id,
     name,
@@ -468,11 +691,15 @@ export function buildDashboardAgent(
     ...(effectiveModel === undefined ? {} : { effectiveModel }),
     modelLabel: described.label,
     ...(described.refLabel === undefined ? {} : { modelRefLabel: described.refLabel }),
+    modelParts: described.parts,
     variantLabel: described.variantLabel,
     status,
     statusLabel: STATUS_LABELS[status],
     source,
     sourceLabel: SOURCE_LABELS[source],
+    configTag,
+    configBadge,
+    configTone: statusTone(status),
     canConfigure: input.known && mode !== "primary",
     canRestore: teamModel !== undefined,
     prompt,
@@ -520,16 +747,26 @@ export function buildDashboardGroups(
     )
 
   return [
-    ...(primary.length === 0 ? [] : [{ key: "primary" as const, title: "PRIMARY", agents: primary }]),
+    ...(primary.length === 0
+      ? []
+      : [{ key: "primary" as const, title: "PRIMARY", count: primary.length, agents: primary }]),
     ...(subagents.length === 0
       ? []
-      : [{ key: "subagents" as const, title: `SUBAGENTS · ${subagents.length}`, agents: subagents }]),
+      : [
+          {
+            key: "subagents" as const,
+            title: "SUBAGENTS",
+            count: subagents.length,
+            agents: subagents,
+          },
+        ]),
     ...(unavailable.length === 0
       ? []
       : [
           {
             key: "unavailable" as const,
-            title: `已保存但不在团队视图 · ${unavailable.length}`,
+            title: "已保存但不在团队视图",
+            count: unavailable.length,
             agents: unavailable,
           },
         ]),
@@ -547,27 +784,41 @@ export function filterDashboardGroups(
       tokens.every((token) => agent.searchText.includes(token)),
     )
     if (agents.length === 0) return []
-    return [
-      {
-        ...group,
-        title:
-          group.key === "subagents"
-            ? `SUBAGENTS · ${agents.length}`
-            : group.key === "unavailable"
-              ? `已保存但不在团队视图 · ${agents.length}`
-              : group.title,
-        agents,
-      },
-    ]
+    return [{ ...group, count: agents.length, agents }]
   })
 }
 
+/**
+ * 弹窗宽度上限来自宿主 xlarge 的 `dialogWidth`（packages/tui/src/ui/dialog.tsx 为 116），
+ * 再减去本插件根容器的左右内边距；布局阈值都按内容宽度判断。
+ */
+const DIALOG_MAX_WIDTH = 116
+const DIALOG_SIDE_PADDING = 4
+
+export function dialogContentWidth(terminalWidth: number): number {
+  return Math.max(0, Math.min(DIALOG_MAX_WIDTH, terminalWidth - 2) - DIALOG_SIDE_PADDING)
+}
+
 export function layoutFor(width: number, height: number): DashboardLayout {
+  const contentWidth = dialogContentWidth(width)
+  const split = contentWidth >= 88
+  const dialogHeight = Math.max(6, Math.min(30, height - 4))
   return {
-    split: width >= 90,
-    compact: height < 20 || width < 100,
-    minimal: width < 50,
-    dialogHeight: Math.max(6, Math.min(30, height - 4)),
-    listWidth: width >= 112 ? 32 : 28,
+    split,
+    // 紧凑只用于真正受限的高度/宽度：80 列终端仍保留两行 Agent 行。
+    compact: height < 14 || contentWidth < 60,
+    minimal: contentWidth < 46,
+    dense: dialogHeight <= 24,
+    dialogHeight,
+    listWidth: !split ? contentWidth : contentWidth >= 106 ? 48 : 38,
+    contentWidth,
+  }
+}
+
+export function modelConfigLayoutFor(width: number, height: number): ModelConfigLayout {
+  const base = layoutFor(width, height)
+  return {
+    ...base,
+    variantWidth: !base.split ? base.contentWidth : base.contentWidth >= 106 ? 34 : 30,
   }
 }

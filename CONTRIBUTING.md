@@ -53,7 +53,7 @@
 ## 验证
 
 自动验证命令与执行要求维护在 [AGENTS.md](AGENTS.md#验证要求)，不要在别处复制一份。
-CI 与 Release 工作流执行同一组检查：版本一致性、类型检查、单测、双入口 esbuild、`npm pack --dry-run`。
+CI 与 Release 工作流执行同一组检查：版本一致性、角色提示词同步、类型检查、单测、双入口 esbuild、`npm pack --dry-run`。
 真实 TUI 的键盘、尺寸与视觉由人工验收，不提交临时渲染测试、探针和截图。
 
 ## npm 分发
@@ -79,7 +79,7 @@ npm 不应再装一份副本。发版后装到空目录，确认 `node_modules` 
 - 不要用 `npm publish --dry-run` 做预检，它会因版本已存在而失败；用 `npm pack --dry-run`。
 - 正式版只能手动 dispatch，不能靠推正式 tag 发布。
 
-流水线：`ci.yml` 在 push `main` / PR 上跑版本一致性 + 类型检查 + 单测 + 双入口构建 + 打包预检；
+流水线：`ci.yml` 在 push `main` / PR 上跑版本一致性 + 角色提示词同步 + 类型检查 + 单测 + 双入口构建 + 打包预检；
 `release.yml` 用 npm Trusted Publishing（OIDC，无长期 token）发版：
 
 | 触发 | 行为 |
@@ -95,7 +95,9 @@ npm 不应再装一份副本。发版后装到空目录，确认 `node_modules` 
 
 1. 确定版本号（维护者决定）：beta 用 `X.Y.Z-beta.N`，正式版去掉后缀。
 2. 改 `package.json` 与 `CHANGELOG.md` 顶部并保持一致；用户可见变化写进对应章节。
-3. 本地跑完 [验证要求](AGENTS.md#验证要求)。`npm run build:tui` 必须通过，`dist/` 是生成物，不提交。
+3. **发布前先运行 `npm run build:prompts`** 重新生成角色提示词；产物有变化就一并提交，再运行
+   `npm run check:prompts` 确认同步。然后本地跑完 [验证要求](AGENTS.md#验证要求)；
+   `npm run build:tui` 必须通过，`dist/` 是生成物，不提交。
 4. 提交并推 `main`，等 CI 全绿。
 5. beta：推 `vX.Y.Z-beta.N` tag，自动发到 `next`；正式版：Actions → Release → Run workflow，
    勾 `publish` + `stable`，发到 `latest`。

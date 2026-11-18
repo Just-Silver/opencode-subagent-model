@@ -325,23 +325,29 @@ test("策略存在共享存储中：A 保存后 B 下一次拦截立即生效，
 test("并发保存不同 Agent 不会互相覆盖", async () => {
   const storage = fakeStorage()
   const { handlers } = await register({ storage, models: CATALOG })
-  // 写入延迟让两次保存在读取阶段重叠；没有串行化时后写会丢掉先写的条目。
+  // 写入延迟让所有保存在读取阶段重叠；没有串行化时后写会丢掉先写的条目。
   const write = storage.api.set
   storage.api.set = async (key, value) => {
     await new Promise((resolve) => setTimeout(resolve, 5))
     await write(key, value)
   }
 
-  const [general, qa] = await Promise.all([
+  const saved = await Promise.all([
     handlers.setAgentModel({ agentID: "general", model: "provider-a/model-a" }),
-    handlers.setAgentModel({ agentID: "qa", model: "provider-a/model-a#low" }),
+    handlers.setAgentModel({ agentID: "explore", model: "provider-a/model-a#low" }),
+    handlers.setAgentModel({ agentID: "qa", model: "provider-a/model/img" }),
+    handlers.setAgentModel({ agentID: "reviewer", model: "provider-a/model-a#high" }),
   ])
 
-  assert.equal(general.ok, true)
-  assert.equal(qa.ok, true)
+  for (const result of saved) assert.equal(result.ok, true, JSON.stringify(result))
   assert.deepEqual(storage.map.get(POLICY_KEY), {
     version: 1,
-    agents: { general: "provider-a/model-a", qa: "provider-a/model-a#low" },
+    agents: {
+      general: "provider-a/model-a",
+      explore: "provider-a/model-a#low",
+      qa: "provider-a/model/img",
+      reviewer: "provider-a/model-a#high",
+    },
   })
 })
 

@@ -98,8 +98,8 @@ System Prompt 与权限：
 如果先移除了旧包再启动新插件，旧值仍在旧命名空间中，但官方插件 API 无法跨命名空间读取；
 本插件不会直接访问数据库。此时直接在 `/team` 重新选择即可。
 
-旧 npm 包的弃用（`npm deprecate`）尚未执行；待 `@justsilver/opencode-team` 发布并验证可安装后，
-再执行弃用并补迁移提示。当前版本不发布或弃用任何包。
+旧 npm 包已在 registry 标记 deprecated：`@justsilver/opencode-subagent-model` 的全部版本安装时
+都会提示迁移到 `@justsilver/opencode-team`。旧包保留可安装、不撤包，已经锁定旧版本的项目仍可重装。
 
 ## 疑难解答
 

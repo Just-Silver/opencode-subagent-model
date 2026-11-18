@@ -74,5 +74,5 @@ git diff --check
   默认手动运行只做打包预检。
 - **新包名的首个版本必须人工在交互终端发**（OIDC 建不了新包），之后才能登记 trusted publisher；
   细节见 `CONTRIBUTING.md`。
-- 旧包只做弃用方案，不提前执行发布或 `npm deprecate`。
+- 旧包已在 npm 标记 deprecated 且不撤包；不再向旧包发布新版本。
 - 不要用 `npm publish --dry-run` 做预检（它会因版本已存在而报错）。

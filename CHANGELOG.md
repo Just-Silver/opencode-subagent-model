@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 旧包 `@justsilver/opencode-subagent-model` 已在 npm 标记 deprecated（覆盖全部已发布版本），
+  弃用提示指向 `@justsilver/opencode-team`；旧包保留可安装，不撤包。
+- `@justsilver/opencode-team` 的 `next` 已对齐到 `0.2.1`，`latest` 与 `next` 指向同一版本。
+
 ## [0.2.1] - 2026-11-18
 
 ### Changed
@@ -90,7 +96,7 @@
 
 - 先安装新包并保留旧包加载，打开一次 `/team` 完成旧全局模型导入，再移除旧包并完全重启。
 - 旧包已移除时不再读取其独立存储命名空间；需要在 `/team` 重新选择 Agent 模型。
-- 旧包 `@justsilver/opencode-subagent-model` 的 npm 弃用操作尚未执行，计划见 [README](README.md#从旧版插件迁移)。
+- 旧包 `@justsilver/opencode-subagent-model` 的 npm 弃用在新包安装验证后执行，步骤见 [README](README.md#从旧版插件迁移)。
 
 ## [0.1.2] - 2026-11-11
 

@@ -101,15 +101,19 @@ GitHub 仓库已改名为 `Just-Silver/opencode-team`，`package.json` 的 homep
 首发后必须核对实际 dist-tag，不能仅靠 `--tag next` 假定 `latest` 一定不存在。
 正式版只走手动 dispatch；不要复用已经发布或撤回的版本号。
 
-### 旧包弃用（待新包发布并验证后）
+### 旧包弃用（已执行）
 
-旧包 `@justsilver/opencode-subagent-model` 当前不执行 `npm deprecate`，避免把用户指向尚未
-发布的包。顺序如下：
+旧包 `@justsilver/opencode-subagent-model` 的全部版本已执行：
 
-1. 先人工发布 `@justsilver/opencode-team`，并用 `opencode plugin add` 验证可安装；
-2. 确认迁移说明与新包可用后，先 `npm login`，再执行
-   `npm deprecate @justsilver/opencode-subagent-model "Renamed to @justsilver/opencode-team; see migration guide"`；
-3. 旧包保留可安装，不撤包，避免已锁版本的用户无法重装。
+```bash
+npm deprecate @justsilver/opencode-subagent-model "Renamed to @justsilver/opencode-team; see migration guide"
+```
+
+规则：
+
+1. 旧包保留可安装，不撤包，避免已锁版本的用户无法重装；
+2. 不再向旧包发布新版本，只通过 deprecate 提示迁移；
+3. 需要改提示文案时重复执行 `npm deprecate`（可只针对单个版本范围），不要再发版本。
 
 发布后 npm 可能存在元数据与 tarball 的传播延迟；确认版本、标签和 tarball 都可取后再宣告可安装。
 不要用 `npm publish --dry-run` 替代打包预检。

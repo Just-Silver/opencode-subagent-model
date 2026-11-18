@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+## [0.2.2] - 2026-11-18
+
+### Fixed
+
+- 修复从 npm 安装后 TUI 面板只渲染首帧、按键与搜索不再响应：发布预编译的 `dist/tui.js`，
+  避开宿主对 `node_modules` 内 `.tsx` 不转换的限制。
+- 并发保存不同 Agent 的模型覆盖不再互相覆盖；策略保存与旧版迁移的读改写串行执行。
+
+### Changed
+
+- 角色提示词改以 `plugin/opencode-team/prompts/*.md` 为唯一来源，构建生成 `prompts.generated.ts`。
+- `@opentui/*` 与 `solid-js` 保持 optional peerDependencies，避免 npm 安装与宿主并存的运行时。
+- `esbuild` 纳入开发依赖，CI 与发布统一使用 `npm run bundle:check`；registry 已存在同版本时发布
+  工作流直接失败，不再跳过发布后仍产生成功结果。
+
 ## [0.2.2-beta.4] - 2026-11-18
 
 ### Fixed

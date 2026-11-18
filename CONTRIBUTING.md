@@ -60,10 +60,10 @@ CI 与 Release 工作流执行同一组检查：版本一致性、类型检查�
 版本单一来源为 `package.json`；发布前同步 CHANGELOG 并完成上述验证。
 `publishConfig.tag = next`，npm 包白名单仅包含插件源码与 CHANGELOG；README、LICENSE 由 npm 自动收录。
 
-`@opentui/core`、`@opentui/solid`、`solid-js` 只声明为 peerDependencies，并且在
-`peerDependenciesMeta` 里标记 `optional: true`。宿主自带这三份运行时；一旦 npm 把它们装进插件目录，
-面板会渲染出来但按键、搜索与点击全部失效（两套 Solid 实例，更新不重绘）。发版后可用
-`npm install <tgz>` 到空目录核对 `node_modules` 里只有 `@justsilver/opencode-team`。
+`@opentui/core`、`@opentui/solid`、`solid-js` 必须是 peerDependencies，并且版本范围锁在宿主运行时使用的
+`>=0.8.4 <0.9.0` / `<2`。npm 安装插件时会把这些依赖装进插件目录；宿主不会为 npm 包注入自己的副本，
+所以不能标记为 optional（会直接报找不到包）。同时不能放开上限——`0.9.x` 与宿主 `0.8.x` 混用时，
+面板能渲染但按键、搜索、点击全部失效。发版后装到空目录，确认实际解析到的是 `0.8.x`。
 
 发版规则：
 

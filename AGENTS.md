@@ -28,7 +28,8 @@ npm 包名 `@justsilver/opencode-team`。
 - 测试只测本次业务行为，外部边界才用假件；纯迁移复用已有用例，不为类型结构、默认值或框架行为补测试。
 - 注释只解释不显然的约束；迁移、来源、版本和审查记录写进文档。
 - npm 包与本地目录两种加载方式不可同时启用；TUI 代码更新后须完全重启客户端。
-- TUI 的 `@opentui/*` 与 `solid-js` 只能声明为 optional peerDependencies，不得让 npm 装进插件目录。
+- TUI 的 `@opentui/*` 与 `solid-js` 必须保留为 peerDependencies，且版本范围锁在宿主使用的 0.8.x；
+  设为 optional 会让 npm 不安装、TUI 直接报找不到包，放开上限会装到不兼容的新版本。
 - **冒烟由用户执行**：agent 不启动真实 OpenCode 实例、不注入按键/鼠标、不截图，也不编写或
   提交临时渲染测试、探针和冒烟脚本；交付前只跑自动验证命令，真实 TUI、终端尺寸与视觉状态由用户验收。
 - **每次发版前必须先用 question 工具向用户确认版本号**，确认后再改 `package.json` 与 CHANGELOG。

@@ -25,9 +25,9 @@ JSX 只在 `view/*.tsx` 中出现。
 - 全局 `/team` 命令层保持 `mode: "global"`；Dashboard 键盘层是
   `mode: "modal"`、`priority: 10`，模型配置键盘层是 `mode: "modal"`、`priority: 20`。
   模型配置打开时 Dashboard 层通过 `enabled: () => !modelOpen()` 停止响应。
-- OpenCode 的 TUI 运行时会提供 `@opentui/core`、`@opentui/solid`、`solid-js`，
-  并按 Solid 规则转换本地 `.tsx`。插件只把它们声明为 **optional** peerDependencies，
-  不打包、也不让 npm 安装副本；两套运行时会让面板首次渲染后不再更新。
+- OpenCode 的 TUI 运行时会为本地目录插件提供 `@opentui/core`、`@opentui/solid`、`solid-js`，
+  并按 Solid 规则转换本地 `.tsx`；npm 安装的插件拿不到宿主注入，必须由 npm 安装这些 peer。
+  版本范围锁在宿主使用的 0.8.x：`0.9.x` 与宿主 `0.8.x` 混用时面板只渲染一次、不再响应更新。
 - `view/team.ts` 不依赖 TUI 渲染；模型保存复用 `setAgentModel` RPC、存储与错误处理。
 
 验证与构建命令见 [AGENTS](../AGENTS.md#验证要求)。

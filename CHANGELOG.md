@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+## [0.2.2-beta.2] - 2026-11-18
+
+### Fixed
+
+- TUI 入口改为发布预编译的 `dist/tui.js`：npm 插件位于 `node_modules`，宿主不会转换该路径下的
+  `.tsx`（anomalyco/opencode#39986），此前会出现面板首帧后不再重绘，或直接报找不到
+  `@opentui/solid`。
+- `@opentui/*` 与 `solid-js` 恢复为 optional peerDependencies，避免 npm 安装与宿主并存的第二套运行时。
+
 ## [0.2.2-beta.1] - 2026-11-18
 
 ### Changed

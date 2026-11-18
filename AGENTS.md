@@ -28,9 +28,10 @@ npm 包名 `@justsilver/opencode-team`。
 - 测试只测本次业务行为，外部边界才用假件；纯迁移复用已有用例，不为类型结构、默认值或框架行为补测试。
 - 注释只解释不显然的约束；迁移、来源、版本和审查记录写进文档。
 - npm 包与本地目录两种加载方式不可同时启用；TUI 代码更新后须完全重启客户端。
-- TUI 的 `@opentui/*` 与 `solid-js` 必须保留为 peerDependencies，且版本范围锁在宿主的 0.8.x。
-  宿主固定 0.8.4；npm 插件位于 `node_modules`，宿主的 Solid 转换会跳过该路径、运行时改写也被 Bun
-  原生加载绕过，因此依赖必须自带，装成 0.9.x 会再带进 core 0.9.2 并与宿主混用。
+- TUI 入口必须发布预编译的 `dist/tui.js`：npm 插件位于 `node_modules`，宿主不会转换该路径下的
+  `.tsx`（anomalyco/opencode#39986），保留 JSX 会首帧后不重绘或直接找不到运行时。
+  `exports["./tui"]` 指向 `dist/tui.js`；`@opentui/*` 与 `solid-js` 保持 optional peer，避免 npm
+  装出与宿主并存的第二套运行时。
 - **冒烟由用户执行**：agent 不启动真实 OpenCode 实例、不注入按键/鼠标、不截图，也不编写或
   提交临时渲染测试、探针和冒烟脚本；交付前只跑自动验证命令，真实 TUI、终端尺寸与视觉状态由用户验收。
 - **每次发版前必须先用 question 工具向用户确认版本号**，确认后再改 `package.json` 与 CHANGELOG。
@@ -48,6 +49,7 @@ npm 包名 `@justsilver/opencode-team`。
 ```text
 npm install --no-package-lock
 npm run typecheck
+npm run build:tui
 node --test
 node scripts/changelog.mjs check
 npx --yes esbuild plugin/opencode-team/index.ts --bundle --platform=node --format=esm --outfile=dist/team-server.js

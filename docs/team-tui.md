@@ -25,10 +25,31 @@ JSX 只在 `view/*.tsx` 中出现。
 - 全局 `/team` 命令层保持 `mode: "global"`；Dashboard 键盘层是
   `mode: "modal"`、`priority: 10`，模型配置键盘层是 `mode: "modal"`、`priority: 20`。
   模型配置打开时 Dashboard 层通过 `enabled: () => !modelOpen()` 停止响应。
-- OpenCode 的 TUI 运行时为本地目录插件提供 `@opentui/core`、`@opentui/solid`、`solid-js`，并按 Solid
-  规则转换 `.tsx`；这条路径不覆盖 `node_modules` 内的插件。仓库固定在 catalog 的 0.8.4，本插件因此
-  把 peer 范围锁在 0.8.x：装成 0.9.x 会带入 core 0.9.x，与宿主混用后面板只渲染一次、不再响应更新。
+- OpenCode 的 Solid 转换只作用于不在 `node_modules` 内的源码。本地目录插件因此可以直接加载
+  `tui.ts` 与 `.tsx`；npm 安装的插件位于 `node_modules` 下，`.tsx` 不会被转换
+  （anomalyco/opencode#39986），现象是首帧渲染后不再重绘，或直接报找不到
+  `@opentui/solid`。
+- 因此发布包把 TUI 依赖图预编译成 `dist/*.js`，`exports["./tui"]` 指向 `dist/tui.js`；编译产物
+  显式 import `@opentui/solid`、`solid-js`、`@opencode/plugin/tui`，由宿主的运行时改写指向宿主实例，
+  插件侧不再需要本地副本。
+- `@opentui/core`、`@opentui/solid`、`solid-js` 保持 **optional** peerDependencies：npm 不会安装
+  副本；一旦装出 0.9.x 等不同 minor，会与宿主的 0.8.x 并存并破坏响应式。
 - `view/team.ts` 不依赖 TUI 渲染；模型保存复用 `setAgentModel` RPC、存储与错误处理。
+
+## 构建
+
+`npm run build:tui`（由 `prepack` 自动执行）用 `babel-preset-solid`（`moduleName: "@opentui/solid"`、
+`generate: "universal"`）从 `tui.ts` 出发递归编译 TUI 依赖图：
+
+```text
+tui.ts → rpc.ts, view/configure.tsx
+view/configure.tsx → dashboard.tsx, model.ts, team.ts
+view/dashboard.tsx → model-config.tsx, ui.tsx, model.ts, team.ts
+view/model.ts → ../model-ref.ts, ../team-ids.ts
+```
+
+产物保持目录结构、相对导入改写为 `.js`，不打包第三方依赖。`dist/` 是构建产物，不提交；发布前由
+`prepack` 清理并重建，避免残留旧的 `.js`。本地目录调试仍加载源码，改动 `view/*.tsx` 后无需构建。
 
 验证与构建命令见 [AGENTS](../AGENTS.md#验证要求)。
 

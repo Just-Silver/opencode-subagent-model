@@ -1,6 +1,6 @@
 {
   "name": "@justsilver/opencode-team",
-  "version": "0.2.2-beta.1",
+  "version": "0.2.2-beta.2",
   "type": "module",
   "description": "Zero-config multi-agent team for OpenCode V2: Orchestrator, QA, Reviewer, and per-agent subagent model/variant policy",
   "license": "MIT",
@@ -18,10 +18,10 @@
   "exports": {
     ".": "./plugin/opencode-team/index.ts",
     "./server": "./plugin/opencode-team/index.ts",
-    "./tui": "./plugin/opencode-team/tui.ts",
+    "./tui": "./dist/tui.js",
     "./rpc": "./plugin/opencode-team/rpc.ts"
   },
-  "files": ["plugin/**/*.ts", "plugin/**/*.tsx", "CHANGELOG.md"],
+  "files": ["plugin/**/*.ts", "plugin/**/*.tsx", "dist/**/*.js", "CHANGELOG.md"],
   "publishConfig": {
     "access": "public",
     "tag": "next"
@@ -31,19 +31,29 @@
   },
   "scripts": {
     "test": "node --test",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:tui": "node scripts/build-tui.mjs",
+    "prepack": "node scripts/build-tui.mjs"
   },
   "peerDependencies": {
     "@opentui/core": ">=0.8.4 <0.9.0",
     "@opentui/solid": ">=0.8.4 <0.9.0",
     "solid-js": ">=1.9.12 <2"
   },
+  "peerDependenciesMeta": {
+    "@opentui/core": { "optional": true },
+    "@opentui/solid": { "optional": true },
+    "solid-js": { "optional": true }
+  },
   "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@babel/preset-typescript": "^7.27.1",
     "@opencode/client": "^2.3.0",
     "@opencode/plugin": "^2.3.0",
     "@opencode/theme": "^2.3.0",
     "@opentui/core": "^0.8.4",
     "@opentui/solid": "^0.8.4",
+    "babel-preset-solid": "^1.9.16",
     "solid-js": "^1.9.17",
     "typescript": "^5.9.3"
   }

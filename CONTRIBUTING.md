@@ -7,7 +7,8 @@
 ## 环境
 
 - Node ≥ 24；TypeScript 源码由宿主直接加载，测试使用 Node 原生类型擦除，无运行时依赖。
-- `npm install --no-package-lock` 只用于安装 `typecheck` 需要的宿主类型声明，不是运行测试或本地加载的前置条件。
+- TUI 入口发布前需要 `npm run build:tui`（`prepack` 自动执行）；本地目录调试加载源码，不需要构建。
+- `npm install --no-package-lock` 只用于安装 `typecheck` 与 TUI 构建需要的依赖，不是运行测试或本地加载的前置条件。
 - 源码在 `plugin/opencode-team/`，模块划分与数据流见 [TUI Dashboard](docs/team-tui.md)；
   策略、存储、Agent 注册与迁移边界见[策略契约](docs/team-policy.md)与[团队 Agent](docs/team-agents.md)。
 
@@ -58,14 +59,18 @@ CI 与 Release 工作流执行同一组检查：版本一致性、类型检查�
 ## npm 分发
 
 版本单一来源为 `package.json`；发布前同步 CHANGELOG 并完成上述验证。
-`publishConfig.tag = next`，npm 包白名单仅包含插件源码与 CHANGELOG；README、LICENSE 由 npm 自动收录。
+`publishConfig.tag = next`，npm 包白名单为插件源码、预编译的 `dist/**/*.js` 与 CHANGELOG；
+README、LICENSE 由 npm 自动收录。
 
-`@opentui/core`、`@opentui/solid`、`solid-js` 必须是 peerDependencies，版本范围锁在宿主的 0.8.x
-（`>=0.8.4 <0.9.0`；OpenCode 在 catalog 里固定 0.8.4）。依据：宿主的 Solid 转换插件过滤条件排除
-`node_modules`，`@opentui/core/runtime-plugin.js` 也注明 Bun 可能原生加载 `node_modules` ESM 而不触发
-`onResolve`，所以 npm 插件必须自带这些依赖。标记为 optional 会直接报找不到包；放开上限会装到
-`@opentui/solid@0.9.x`，而它硬依赖 `@opentui/core@0.9.x`，与宿主 0.8.4 混用时面板能渲染但不再刷新。
-发版后装到空目录，确认实际解析到的是 `0.8.x`。
+TUI 必须发布预编译产物：npm 插件位于 `node_modules`，宿主不会转换该路径下的 `.tsx`
+（anomalyco/opencode#39986），保留 JSX 会出现“首帧渲染后不重绘”或“找不到 `@opentui/solid`”。
+`prepack` 会运行 `npm run build:tui`，`exports["./tui"]` 指向 `dist/tui.js`；构建细节见
+[TUI Dashboard](docs/team-tui.md#构建)。
+
+`@opentui/core`、`@opentui/solid`、`solid-js` 声明为 **optional** peerDependencies
+（`peerDependenciesMeta`）：编译产物用普通 import 引用它们，宿主的运行时改写会指向宿主实例，
+npm 不应再装一份副本。发版后装到空目录，确认 `node_modules` 里只有 `@justsilver/opencode-team`，
+并且 tarball 含 `dist/tui.js`。
 
 发版规则：
 

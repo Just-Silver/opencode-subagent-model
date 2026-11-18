@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.2.2-beta.3] - 2026-11-18
+
 ### Changed
 
 - 角色提示词改以 `plugin/opencode-team/prompts/*.md` 为唯一来源：Frontmatter 的 `description`

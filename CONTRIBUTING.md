@@ -60,10 +60,12 @@ CI 与 Release 工作流执行同一组检查：版本一致性、类型检查�
 版本单一来源为 `package.json`；发布前同步 CHANGELOG 并完成上述验证。
 `publishConfig.tag = next`，npm 包白名单仅包含插件源码与 CHANGELOG；README、LICENSE 由 npm 自动收录。
 
-`@opentui/core`、`@opentui/solid`、`solid-js` 必须是 peerDependencies，并且版本范围锁在宿主运行时使用的
-`>=0.8.4 <0.9.0` / `<2`。npm 安装插件时会把这些依赖装进插件目录；宿主不会为 npm 包注入自己的副本，
-所以不能标记为 optional（会直接报找不到包）。同时不能放开上限——`0.9.x` 与宿主 `0.8.x` 混用时，
-面板能渲染但按键、搜索、点击全部失效。发版后装到空目录，确认实际解析到的是 `0.8.x`。
+`@opentui/core`、`@opentui/solid`、`solid-js` 必须是 peerDependencies，版本范围锁在宿主的 0.8.x
+（`>=0.8.4 <0.9.0`；OpenCode 在 catalog 里固定 0.8.4）。依据：宿主的 Solid 转换插件过滤条件排除
+`node_modules`，`@opentui/core/runtime-plugin.js` 也注明 Bun 可能原生加载 `node_modules` ESM 而不触发
+`onResolve`，所以 npm 插件必须自带这些依赖。标记为 optional 会直接报找不到包；放开上限会装到
+`@opentui/solid@0.9.x`，而它硬依赖 `@opentui/core@0.9.x`，与宿主 0.8.4 混用时面板能渲染但不再刷新。
+发版后装到空目录，确认实际解析到的是 `0.8.x`。
 
 发版规则：
 

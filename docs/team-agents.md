@@ -74,11 +74,11 @@ Orchestrator 负责。两者因此都是叶子子代理。
 ### 用户配置优先
 
 宿主先应用内置 Agent 权限，再应用插件 transform，最后应用用户配置 Agent 的权限规则。
-插件不追加规则，所以用户规则直接追加在宿主默认规则之后，按“最后命中”生效：
+插件给 `qa`、`reviewer` 追加的两条拒绝先于用户规则，所以用户规则追加在其后，按“最后命中”生效：
 
 ```jsonc
 {
-  "agent": {
+  "agents": {
     "reviewer": {
       "permissions": [
         { "action": "edit", "resource": "*", "effect": "deny" }

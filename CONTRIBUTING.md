@@ -18,7 +18,8 @@
 - 首行前缀表示变更性质：`feat`、`fix`、`docs`、`refactor`、`test`、`chore`、`perf`。
 - 一次提交只做一件事；不把重构、格式化与行为改动塞进同一提交。
 - 详细动机、约束和取舍写在正文或对应文档里，代码注释只保留不显然的原因。
-- 不提交生成物、临时脚本、探针和本地调试配置。
+- 只提交与改动相关的文件；`dist/` 是构建产物不提交，`prompts.generated.ts` 是例外——必须提交并用
+  `npm run check:prompts` 保证与 Markdown 同步。临时脚本、探针和本地调试配置不提交。
 
 ## 分支与 PR
 
@@ -33,7 +34,7 @@
 
 - **Bug**：OpenCode 版本、安装方式（npm / 本地目录）、复现步骤、期望与实际、相关日志或面板报错。
 - **功能建议**：要解决的场景、现有做法的不足、可接受的权衡；涉及模型覆盖时说明目标 Agent。
-- 报告前先查[疑难解答](README.md#疑难解答)，并确认没有同时启用旧包、npm 包和本地目录三份。
+- 报告前先查[常见问题](README.md#常见问题)，并确认没有同时启用旧包、npm 包和本地目录三份。
 - 不粘贴 token、OTP、存储内容或其他敏感信息。
 
 ## 本地调试
@@ -44,7 +45,7 @@
 - 调试本仓库改动时，把该项换成插件目录的绝对路径，并移除 npm 同名项（同一插件 ID 不能并存）：
 
   ```json
-  { "package": "D:\\Code\\Projects\\Agents\\opencode-subagent-model\\plugin\\opencode-team" }
+  { "package": "<仓库>/plugin/opencode-team" }
   ```
 
 - 改完配置与代码后完全退出并重新启动 OpenCode；TUI 入口只在启动时加载，不存在热更新；
@@ -53,7 +54,8 @@
 ## 验证
 
 自动验证命令与执行要求维护在 [AGENTS.md](AGENTS.md#验证要求)，不要在别处复制一份。
-CI 与 Release 工作流执行同一组检查：版本一致性、角色提示词同步、类型检查、单测、双入口 esbuild、`npm pack --dry-run`。
+CI 与 Release 工作流执行同一组检查：版本一致性、角色提示词同步、类型检查、单测、双入口构建
+（`npm run bundle:check`）、`npm pack --dry-run`。
 真实 TUI 的键盘、尺寸与视觉由人工验收，不提交临时渲染测试、探针和截图。
 
 ## npm 分发
@@ -76,10 +78,13 @@ npm 不应再装一份副本。发版后装到空目录，确认 `node_modules` 
 
 - **版本号必须先向用户确认**，再改 `package.json` 与 `CHANGELOG.md`；两者顶部必须一致。
 - 不复用已发布或已撤回的版本号；`0.0.0-stage` 这类占位版本不影响安装。
+- 版本已存在于 registry 时工作流直接失败，不会建 tag 或 GitHub Release；如果 npm 已发布但 tag/Release
+  缺失，需要手动补建。
 - 不要用 `npm publish --dry-run` 做预检，它会因版本已存在而失败；用 `npm pack --dry-run`。
 - 正式版只能手动 dispatch，不能靠推正式 tag 发布。
 
-流水线：`ci.yml` 在 push `main` / PR 上跑版本一致性 + 角色提示词同步 + 类型检查 + 单测 + 双入口构建 + 打包预检；
+流水线：`ci.yml` 在 push `main` / PR 上跑版本一致性 + 角色提示词同步 + 类型检查 + 单测 + 双入口构建
+（`bundle:check`）+ 打包预检；
 `release.yml` 用 npm Trusted Publishing（OIDC，无长期 token）发版：
 
 | 触发 | 行为 |

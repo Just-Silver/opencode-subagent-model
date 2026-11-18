@@ -2,7 +2,7 @@
 
 # TUI Dashboard
 
-`/team` 的 TUI 入口是 `plugin/opencode-team/tui.ts`，界面实现按职责拆分：
+`/team` 的 TUI 源码入口是 `plugin/opencode-team/tui.ts`（npm 包通过 `dist/tui.js` 加载），界面实现按职责拆分：
 
 ```text
 plugin/opencode-team/
@@ -197,11 +197,10 @@ Dashboard 与模型配置的搜索框都常驻并默认聚焦，不需要按 `/`
 ```bash
 npm install --no-package-lock
 npm run typecheck
+npm run check:prompts
+npm run build:tui
 node --test
-npx --yes esbuild plugin/opencode-team/tui.ts --bundle --platform=node --format=esm \
-  --jsx=automatic --jsx-import-source=@opentui/solid \
-  --external:@opencode/plugin/tui --external:@opentui/core \
-  --external:@opentui/solid --external:solid-js --outfile=dist/team-tui.js
+npm run bundle:check
 npm pack --dry-run
 git diff --check
 ```

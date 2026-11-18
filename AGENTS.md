@@ -14,7 +14,8 @@ npm 包名 `@justsilver/opencode-team`。
 - 未配置的 Agent 继承原生规则；读取失败或持久值损坏必须显式报错，不静默回退。
 - 旧版插件仍加载时不得让两份策略同时覆盖：检测冲突、停止新覆盖、通过旧 RPC 一次性导入并提示移除。
 - 不直接读写 SQLite，不自动迁移旧命名空间，不依赖供应商注册表或 HUD。
-- 同目录双入口：`plugin/opencode-team/index.ts` 为 server，`tui.ts` 为 TUI。
+- 同目录源码入口：`plugin/opencode-team/index.ts` 为 server，`tui.ts` 为 TUI 源码；
+  npm 的 `exports["./tui"]` 指向预编译的 `dist/tui.js`。
 - server 不运行时导入任何 `@opencode/*`；RPC 使用普通 JSON Schema 对象。
 - 相对导入带显式扩展名（`.ts` / `.tsx`）；Node ≥ 24 原生擦除类型测试，不引入运行时依赖。
 - 源码不放 `.opencode/plugins/`，避免本地自动发现与 npm 安装产生同 ID 重复插件。
@@ -53,8 +54,7 @@ npm run check:prompts
 npm run build:tui
 node --test
 node scripts/changelog.mjs check
-npx --yes esbuild plugin/opencode-team/index.ts --bundle --platform=node --format=esm --outfile=dist/team-server.js
-npx --yes esbuild plugin/opencode-team/tui.ts --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:@opentui/core --external:@opentui/solid --external:solid-js --outfile=dist/team-tui.js
+npm run bundle:check
 npm pack --dry-run
 git diff --check
 ```

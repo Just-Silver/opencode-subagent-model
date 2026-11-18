@@ -54,6 +54,8 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
   这是持久设置，不使用 TTL，也不写 TUI 本地存储或 `opencode.json`。
 - 每次 `subagent` 执行前读取同一键，不在 location 实例闭包中缓存设置；保存成功后跨项目生效。
 - 只通过宿主存储 API 读写，不直接操作 SQLite 文件。
+- 宿主 storage 只提供 `get` / `set`，没有 compare-and-swap；保存与旧版迁移的读改写通过进程内队列
+  串行执行，避免并发保存不同 Agent 时后者覆盖前者。多个服务端进程同时写同一键仍不在保证范围内。
 
 迁移用独立键 `team-legacy-migration` 记录一次性导入结果，结构为
 `{ from, status: "applied" | "empty", model, agents: string[] }`。

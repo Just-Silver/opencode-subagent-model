@@ -158,6 +158,18 @@ async function writePolicy(storage: TeamPolicyContext["storage"], agents: Record
   }
 }
 
+// 宿主 storage 只有 get/set，没有 compare-and-swap；并发保存必须串行，否则后写覆盖先写。
+let pendingPolicyMutation: Promise<unknown> = Promise.resolve()
+
+function mutatePolicy<T>(operation: () => Promise<T>): Promise<T> {
+  const result = pendingPolicyMutation.then(operation, operation)
+  pendingPolicyMutation = result.then(
+    () => undefined,
+    () => undefined,
+  )
+  return result
+}
+
 async function readMarker(storage: TeamPolicyContext["storage"]): Promise<MigrationMarker | undefined> {
   const raw = await storage.get(MIGRATION_KEY)
   if (raw === undefined) return undefined
@@ -356,32 +368,31 @@ async function runMigration(
     return { status: "failed", errors: [`The legacy model "${legacyModel}" is invalid.`] }
   }
 
-  let agents: Record<string, string>
   try {
-    agents = await readPolicy(ctx.storage)
+    return await mutatePolicy(async () => {
+      const agents = await readPolicy(ctx.storage)
+
+      const imported =
+        legacyModel === null
+          ? []
+          : (await listSubagentIDs(ctx, fallbackAgents)).filter((agent) => agents[agent] === undefined)
+      if (legacyModel !== null) {
+        for (const agentID of imported) agents[agentID] = legacyModel
+      }
+
+      const marker: MigrationMarker = {
+        from: "opencode-subagent-model",
+        status: legacyModel === null ? "empty" : "applied",
+        model: legacyModel,
+        agents: imported,
+      }
+      if (imported.length > 0) await writePolicy(ctx.storage, agents)
+      await writeMarker(ctx.storage, marker)
+      return marker
+    })
   } catch (error) {
     return { status: "failed", errors: [message(error)] }
   }
-
-  const imported =
-    legacyModel === null ? [] : (await listSubagentIDs(ctx, fallbackAgents)).filter((agent) => agents[agent] === undefined)
-  if (legacyModel !== null) {
-    for (const agentID of imported) agents[agentID] = legacyModel
-  }
-
-  const marker: MigrationMarker = {
-    from: "opencode-subagent-model",
-    status: legacyModel === null ? "empty" : "applied",
-    model: legacyModel,
-    agents: imported,
-  }
-  try {
-    if (imported.length > 0) await writePolicy(ctx.storage, agents)
-    await writeMarker(ctx.storage, marker)
-  } catch (error) {
-    return { status: "failed", errors: [message(error)] }
-  }
-  return marker
 }
 
 /**
@@ -521,19 +532,16 @@ async function setAgentModel(
 
   let agents: Record<string, string>
   try {
-    agents = await readPolicy(ctx.storage)
-  } catch (error) {
-    return { ok: false, supported: true, agentsSupported, errors: [message(error)] }
-  }
-
-  if (model === null) {
-    delete agents[agentID]
-  } else {
-    agents[agentID] = formatModelRef(ref!)
-  }
-
-  try {
-    await writePolicy(ctx.storage, agents)
+    agents = await mutatePolicy(async () => {
+      const next = await readPolicy(ctx.storage)
+      if (model === null) {
+        delete next[agentID]
+      } else {
+        next[agentID] = formatModelRef(ref!)
+      }
+      await writePolicy(ctx.storage, next)
+      return next
+    })
   } catch (error) {
     return { ok: false, supported: true, agentsSupported, errors: [message(error)] }
   }

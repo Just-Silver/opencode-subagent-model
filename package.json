@@ -1,6 +1,6 @@
 {
   "name": "@justsilver/opencode-team",
-  "version": "0.2.2-beta.3",
+  "version": "0.2.2-beta.4",
   "type": "module",
   "description": "Zero-config multi-agent team for OpenCode V2: Orchestrator, QA, Reviewer, and per-agent subagent model/variant policy",
   "license": "MIT",
@@ -35,6 +35,7 @@
     "build:prompts": "node scripts/build-prompts.mjs gen",
     "check:prompts": "node scripts/build-prompts.mjs check",
     "build:tui": "node scripts/build-tui.mjs",
+    "bundle:check": "esbuild plugin/opencode-team/index.ts --bundle --platform=node --format=esm --outfile=dist/team-server.js && esbuild plugin/opencode-team/tui.ts --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:@opentui/core --external:@opentui/solid --external:solid-js --outfile=dist/team-tui.js",
     "prepack": "node scripts/build-prompts.mjs check && node scripts/build-tui.mjs"
   },
   "peerDependencies": {
@@ -56,6 +57,7 @@
     "@opentui/core": "^0.8.4",
     "@opentui/solid": "^0.8.4",
     "babel-preset-solid": "^1.9.16",
+    "esbuild": "^0.28.2",
     "solid-js": "^1.9.17",
     "typescript": "^5.9.3"
   }

@@ -24,7 +24,8 @@ npm 包名 `@justsilver/opencode-team`。
 - 插件只给 QA/Reviewer 注入 `question * deny` 与 `subagent * deny`；其余权限继承 OpenCode 默认与用户配置，
   Orchestrator 不追加规则，General/Explore 的定义与权限不被修改。
 - 不得把这些职责约束描述成权限沙箱；需要硬限制时由用户配置 Agent 权限。
-- 不自动修改默认主代理；保持 Build 或用户显式 `default_agent`。
+- 默认主代理不自动修改；只有用户在 `/team` 面板显式开启开关时才设为 Orchestrator，
+  用户配置的 `default_agent` 仍优先。
 - 用户配置合并顺序在插件之后，测试必须覆盖用户对插件默认权限的覆盖。
 - 测试只测本次业务行为，外部边界才用假件；纯迁移复用已有用例，不为类型结构、默认值或框架行为补测试。
 - 注释只解释不显然的约束；迁移、来源、版本和审查记录写进文档。

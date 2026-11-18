@@ -9,6 +9,7 @@ import {
   refreshModels,
   restoreAgentModel,
   saveAgentModel,
+  setDefaultAgent,
 } from "./team.ts"
 
 // A second /team while a model picker is open replaces the first flow; the old continuation
@@ -46,6 +47,8 @@ export async function configureTeam(ctx: Plugin.Context): Promise<void> {
           {...(data.warning === undefined ? {} : { warning: data.warning })}
           agentsSupported={data.agentsSupported}
           {...(data.agentsError === undefined ? {} : { agentsError: data.agentsError })}
+          defaultAgent={data.defaultAgent}
+          toggleDefaultAgent={(enabled) => setDefaultAgent(ctx, location, enabled)}
           refreshModels={() => refreshModels(ctx, location)}
           favorites={normalizeFavorites(favorites)}
           toggleFavorite={async (ref) => {

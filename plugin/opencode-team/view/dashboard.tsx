@@ -18,6 +18,8 @@ import {
   filterDashboardGroups,
   layoutFor,
   roleLabel,
+  SETTINGS_ID,
+  settingsRowVisible,
   type DashboardAgent,
   type DashboardAgentInput,
   type DashboardGroup,
@@ -55,6 +57,8 @@ export interface TeamDashboardProps {
   readonly warning?: string
   readonly agentsSupported: boolean
   readonly agentsError?: string
+  readonly defaultAgent: boolean
+  readonly toggleDefaultAgent: (enabled: boolean) => Promise<ModelSelectionResult>
   readonly refreshModels: () => Promise<{
     readonly models: readonly ModelInfo[]
     readonly error?: string
@@ -85,6 +89,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
   const initialRows = initialGroups.flatMap((group) => group.agents)
   const initialID = initialRows[0]?.id ?? ""
   const [selectedID, setSelectedID] = createSignal(initialID)
+  const [defaultAgent, setDefaultAgent] = createSignal(props.defaultAgent)
   const [query, setQuery] = createSignal("")
   const [pane, setPane] = createSignal<"list" | "detail">("list")
   const [modelOpen, setModelOpen] = createSignal(false)
@@ -109,9 +114,13 @@ export function TeamDashboard(props: TeamDashboardProps) {
 
   const allGroups = () => buildDashboardGroups(props.agents, overrides(), models(), props.providers)
   const groups = () => filterDashboardGroups(allGroups(), query())
-  const rows = () => groups().flatMap((group) => group.agents)
-  const selected = () =>
-    rows().find((agent) => agent.id === selectedID()) ?? rows()[0]
+  const agentRows = () => groups().flatMap((group) => group.agents)
+  const settingsVisible = () => settingsRowVisible(query())
+  const rowIDs = () => [
+    ...(settingsVisible() && agentRows().length > 0 ? [SETTINGS_ID] : []),
+    ...agentRows().map((agent) => agent.id),
+  ]
+  const selected = () => agentRows().find((agent) => agent.id === selectedID())
 
   // 配置视图跟着 overrides 重新计算，保存/恢复后顶部状态与“当前模型”立即更新。
   const configAgent = createMemo(() => {
@@ -123,8 +132,10 @@ export function TeamDashboard(props: TeamDashboardProps) {
   })
 
   createEffect(() => {
-    const agent = selected()
-    if (agent !== undefined && agent.id !== selectedID()) setSelectedID(agent.id)
+    const ids = rowIDs()
+    if (ids.includes(selectedID())) return
+    // 过滤/清空搜索后优先落回 Agent 行，避免直接停在设置行上误触空格。
+    setSelectedID(agentRows()[0]?.id ?? ids[0] ?? "")
   })
 
   let listScroll: ScrollBoxRenderable | undefined
@@ -134,11 +145,21 @@ export function TeamDashboard(props: TeamDashboardProps) {
   let scrollTimer: ReturnType<typeof setTimeout> | undefined
   const rowNodes = new Map<string, Renderable>()
 
+  let searchFocused = true
+  // 设置行选中时空格同时被输入框接收；切换后恢复进入设置行前的查询，避免留下空格。
+  let settingsQuery = ""
+
   function focusSearch(): void {
     if (pendingRestore() !== undefined || restoring()) return
     if (searchInput === undefined || searchInput.isDestroyed) return
     searchInput.focus()
     searchInput.cursorOffset = searchInput.value.length
+    searchFocused = true
+  }
+
+  function blurSearch(): void {
+    if (searchInput !== undefined && !searchInput.isDestroyed) searchInput.blur()
+    searchFocused = false
   }
 
   function scheduleFocusSearch(): void {
@@ -148,11 +169,19 @@ export function TeamDashboard(props: TeamDashboardProps) {
 
   createEffect(
     on(
-      () => selected()?.id,
+      selectedID,
       (id) => {
         if (id !== undefined) ensureVisible(id)
         detailScroll?.scrollTo(0)
+        // 设置行选中时移走搜索焦点，空格才是开关而不是空白字符。
+        if (id === SETTINGS_ID) {
+          settingsQuery = query()
+          blurSearch()
+        } else if (pendingRestore() === undefined && !restoring()) {
+          scheduleFocusSearch()
+        }
       },
+      { defer: true },
     ),
   )
 
@@ -179,21 +208,21 @@ export function TeamDashboard(props: TeamDashboardProps) {
   }
 
   function move(delta: number): void {
-    const list = rows()
+    const list = rowIDs()
     if (list.length === 0) return
-    const index = list.findIndex((agent) => agent.id === selectedID())
+    const index = list.indexOf(selectedID())
     const next = index < 0 ? 0 : (index + delta + list.length) % list.length
-    setSelectedID(list[next]!.id)
+    setSelectedID(list[next]!)
   }
 
   function first(): void {
-    const list = rows()
-    if (list.length > 0) setSelectedID(list[0]!.id)
+    const list = rowIDs()
+    if (list.length > 0) setSelectedID(list[0]!)
   }
 
   function last(): void {
-    const list = rows()
-    if (list.length > 0) setSelectedID(list[list.length - 1]!.id)
+    const list = rowIDs()
+    if (list.length > 0) setSelectedID(list[list.length - 1]!)
   }
 
   function page(delta: number): void {
@@ -203,7 +232,12 @@ export function TeamDashboard(props: TeamDashboardProps) {
 
   async function choose(): Promise<void> {
     const agent = selected()
-    if (agent === undefined) return
+    if (agent === undefined) {
+      if (selectedID() === SETTINGS_ID) {
+        showFeedback({ tone: "info", message: "按空格切换默认代理。" })
+      }
+      return
+    }
     if (!layout().split && pane() === "list") {
       setPane("detail")
       return
@@ -242,6 +276,7 @@ export function TeamDashboard(props: TeamDashboardProps) {
   }
 
   function requestRestore(): void {
+    if (selectedID() === SETTINGS_ID) return
     const agent = selected()
     if (agent === undefined) return
     if (!agent.canRestore) {
@@ -275,6 +310,42 @@ export function TeamDashboard(props: TeamDashboardProps) {
       })
     }
     scheduleFocusSearch()
+  }
+
+  let togglingDefault = false
+
+  async function toggleDefaultAgentNow(): Promise<void> {
+    if (togglingDefault || pendingRestore() !== undefined || restoring()) return
+    blurSearch()
+    setQuery(settingsQuery)
+    if (searchInput !== undefined && !searchInput.isDestroyed) {
+      searchInput.value = settingsQuery
+      searchInput.cursorOffset = settingsQuery.length
+    }
+    togglingDefault = true
+    showFeedback({ tone: "info", message: "正在保存默认代理设置…" })
+    try {
+      const result = await props.toggleDefaultAgent(!defaultAgent())
+      if (disposed) return
+      if (result.defaultAgent !== undefined) setDefaultAgent(result.defaultAgent)
+      showFeedback({ tone: result.tone, message: result.message })
+    } catch (error) {
+      if (disposed) return
+      showFeedback({
+        tone: "error",
+        message: `保存默认代理设置失败：${error instanceof Error ? error.message : String(error)}`,
+      })
+    } finally {
+      togglingDefault = false
+      if (!disposed) {
+        setQuery(settingsQuery)
+        if (searchInput !== undefined && !searchInput.isDestroyed) {
+          searchInput.value = settingsQuery
+          searchInput.cursorOffset = settingsQuery.length
+        }
+        blurSearch()
+      }
+    }
   }
 
   function close(): void {
@@ -328,8 +399,20 @@ export function TeamDashboard(props: TeamDashboardProps) {
         bind: "enter",
         run: () => {
           if (pendingRestore() !== undefined) void confirmRestoreNow()
-          else void choose()
+          else if (selectedID() === SETTINGS_ID) {
+            showFeedback({ tone: "info", message: "按空格切换默认代理。" })
+          } else void choose()
         },
+      },
+      {
+        id: "opencode-team.dashboard.default_agent",
+        bind: "space",
+        enabled: () =>
+          selectedID() === SETTINGS_ID &&
+          !searchFocused &&
+          pendingRestore() === undefined &&
+          !restoring(),
+        run: () => void toggleDefaultAgentNow(),
       },
       {
         id: "opencode-team.dashboard.restore",
@@ -447,7 +530,11 @@ export function TeamDashboard(props: TeamDashboardProps) {
             <ListPane
               theme={theme()}
               groups={groups()}
-              selectedID={selected()?.id}
+              selectedID={selectedID()}
+              settingsVisible={settingsVisible()}
+              settingsSelected={selectedID() === SETTINGS_ID}
+              defaultAgent={defaultAgent()}
+              onToggleSettings={() => void toggleDefaultAgentNow()}
               compact={layout().compact}
               width={split() ? layout().listWidth : undefined}
               onSelect={(id) => {
@@ -466,6 +553,8 @@ export function TeamDashboard(props: TeamDashboardProps) {
             <DetailPane
               theme={theme()}
               agent={agent()}
+              settingsSelected={selectedID() === SETTINGS_ID}
+              defaultAgent={defaultAgent()}
               compact={layout().compact}
               onScrollRef={(value) => (detailScroll = value)}
             />
@@ -494,6 +583,8 @@ export function TeamDashboard(props: TeamDashboardProps) {
           split={split()}
           pane={pane()}
           agent={agent()}
+          settingsSelected={selectedID() === SETTINGS_ID}
+          defaultAgent={defaultAgent()}
           confirming={pendingRestore() !== undefined}
         />
       </Show>
@@ -524,7 +615,7 @@ function Header(props: {
         <text fg={props.theme.text.muted}>{escapeLabel()}</text>
       </box>
       <Show when={!props.layout.minimal}>
-        <text fg={props.theme.text.muted}>模型策略只覆盖子代理</text>
+        <text fg={props.theme.text.muted}>模型策略只覆盖子代理；默认代理可单独设置</text>
       </Show>
     </box>
   )
@@ -571,6 +662,10 @@ function ListPane(props: {
   readonly theme: Theme
   readonly groups: readonly DashboardGroup[]
   readonly selectedID?: string
+  readonly settingsVisible: boolean
+  readonly settingsSelected: boolean
+  readonly defaultAgent: boolean
+  readonly onToggleSettings: () => void
   readonly compact: boolean
   readonly width?: number
   readonly onSelect: (id: string) => void
@@ -602,6 +697,45 @@ function ListPane(props: {
           horizontalScrollbarOptions={{ visible: false }}
           ref={props.onScrollRef}
         >
+          <Show when={props.settingsVisible}>
+            <>
+              <box
+                flexDirection="column"
+                paddingLeft={1}
+                paddingRight={1}
+                backgroundColor={rowBackground(props.theme, props.settingsSelected)}
+                onMouseUp={props.onToggleSettings}
+                ref={(node: Renderable) => props.onRef(SETTINGS_ID, node)}
+              >
+                <box flexDirection="row" gap={1}>
+                  <text flexShrink={0} fg={rowMarker(props.theme, props.settingsSelected)}>
+                    {props.settingsSelected ? "▌" : " "}
+                  </text>
+                  <text
+                    flexGrow={1}
+                    fg={rowForeground(props.theme)}
+                    attributes={props.settingsSelected ? TextAttributes.BOLD : undefined}
+                  >
+                    默认代理
+                  </text>
+                  <text flexShrink={0} fg={props.theme.text.base}>
+                    Orchestrator
+                  </text>
+                  <text
+                    flexShrink={0}
+                    fg={
+                      props.defaultAgent
+                        ? toneColor(props.theme, "success")
+                        : rowSecondary(props.theme, props.settingsSelected)
+                    }
+                  >
+                    {props.defaultAgent ? "开" : "关"}
+                  </text>
+                </box>
+              </box>
+              <box height={1} />
+            </>
+          </Show>
           <For each={props.groups}>
             {(group, index) => (
               <box flexDirection="column">
@@ -673,11 +807,33 @@ function ListPane(props: {
 function DetailPane(props: {
   readonly theme: Theme
   readonly agent?: DashboardAgent
+  readonly settingsSelected: boolean
+  readonly defaultAgent: boolean
   readonly compact: boolean
   readonly onScrollRef: (value: ScrollBoxRenderable) => void
 }) {
   return (
     <box flexGrow={1} minWidth={0} minHeight={0} paddingLeft={2}>
+      <Show when={props.settingsSelected}>
+        <box flexDirection="column" gap={1} paddingTop={1} paddingRight={1}>
+          <text fg={props.theme.text.base} attributes={TextAttributes.BOLD}>
+            默认代理
+          </text>
+          <text fg={selectedRowAccent(props.theme)} attributes={TextAttributes.BOLD}>
+            Orchestrator
+          </text>
+          <text fg={props.theme.text.muted} wrapMode="word">
+            开启后，新会话默认使用 Orchestrator；已有会话的代理不受影响。
+          </text>
+          <text fg={props.theme.text.muted} wrapMode="word">
+            用户配置了 default_agent 时，以该配置为准。
+          </text>
+          <text fg={props.theme.text.muted} wrapMode="word">
+            当前：{props.defaultAgent ? "开" : "关"} · 选中后按空格切换
+          </text>
+        </box>
+      </Show>
+      <Show when={!props.settingsSelected}>
       <Show
         when={props.agent}
         fallback={
@@ -791,6 +947,7 @@ function DetailPane(props: {
           </scrollbox>
         )}
       </Show>
+      </Show>
     </box>
   )
 }
@@ -801,6 +958,8 @@ function Footer(props: {
   readonly split: boolean
   readonly pane: "list" | "detail"
   readonly agent?: DashboardAgent
+  readonly settingsSelected: boolean
+  readonly defaultAgent: boolean
   readonly confirming: boolean
 }) {
   const enter = () => (props.agent?.canConfigure === true ? "模型" : "说明")
@@ -809,6 +968,13 @@ function Footer(props: {
       return [
         { key: "Enter", label: "确认" },
         { key: "ESC", label: "取消" },
+      ]
+    }
+    if (props.settingsSelected) {
+      return [
+        { key: "↑↓", label: "选择" },
+        { key: "空格", label: props.defaultAgent ? "关闭默认代理" : "开启默认代理" },
+        { key: "ESC", label: "关闭" },
       ]
     }
     if (props.minimal) {

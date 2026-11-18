@@ -54,6 +54,8 @@ Orchestrator 不会自动成为默认主代理；用 OpenCode 的 Agent 切换�
   `ESC` 返回或关闭。
 - 模型配置按 Provider 分组，`←`/`→` 与 `Tab` 切换区域和变体，`Enter` 保存，`Ctrl+R` 恢复原生。
 - 模型列表按 `Ctrl+F` 收藏当前模型，收藏项置顶显示；收藏全局共享，与 `/models` 的收藏互相独立。
+- 列表顶部「默认代理」行选中后按 `空格` 切换：开启后新会话默认使用 Orchestrator；
+  用户配置的 `default_agent` 仍优先。
 - 模型设置全局共享、重启保留；主代理模型只读，由 OpenCode 会话选择。
 - 窄终端自动切换为单栏布局。
 

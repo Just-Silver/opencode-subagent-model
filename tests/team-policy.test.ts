@@ -348,6 +348,7 @@ test("并发保存不同 Agent 不会互相覆盖", async () => {
       qa: "provider-a/model/img",
       reviewer: "provider-a/model-a#high",
     },
+    defaultAgent: false,
   })
 })
 
@@ -371,7 +372,10 @@ test("保存时拒绝未知模型、非聊天模型、非法变体与非法引�
     assert.ok((summary.errors ?? []).length > 0, `拒绝 ${JSON.stringify(model)} 时应说明原因`)
   }
 
-  assert.deepEqual(storage.map.get(POLICY_KEY), { version: 1, agents: { general: "provider-a/model-a" } })
+  assert.deepEqual(storage.map.get(POLICY_KEY), {
+    version: 1,
+    agents: { general: "provider-a/model-a" },
+  })
 })
 
 test("保存时拒绝不存在的 Agent 与主代理；清除旧条目不要求 Agent 仍存在", async () => {
@@ -446,7 +450,10 @@ test("保存写入失败时报告失败并保留旧设置", async () => {
   const summary = await handlers.setAgentModel({ agentID: "general", model: "provider-a/model-a#high" })
   assert.equal(summary.ok, false)
   assert.ok((summary.errors ?? []).length > 0)
-  assert.deepEqual(storage.map.get(POLICY_KEY), { version: 1, agents: { general: "provider-a/model-a" } })
+  assert.deepEqual(storage.map.get(POLICY_KEY), {
+    version: 1,
+    agents: { general: "provider-a/model-a" },
+  })
 })
 
 test("宿主不能动态注册 Agent 时仍保留按 Agent 的模型覆盖，并明确 agentsSupported=false", async () => {
@@ -690,6 +697,7 @@ test("旧版插件仍在加载时不覆盖输入、报告冲突并拒绝改写�
       qa: "provider-a/model-a#high",
       reviewer: "provider-a/model-a#high",
     },
+    defaultAgent: false,
   })
 })
 
@@ -815,4 +823,55 @@ test("旧版插件检测覆盖包名、插件 ID 与本地目录，但不把新�
   assert.equal((await detect([{ ...base, source: { type: "local", path: "D:\\repo\\plugin\\opencode-subagent-model" } }])).active, true)
   assert.equal((await detect([{ ...base, source: { type: "local", path: "D:\\repo\\opencode-subagent-model\\plugin\\opencode-team" } }])).active, false)
   assert.equal((await detect([{ ...base, id: "opencode-subagent-model", source: { type: "package", target: "new" } }])).active, true)
+})
+
+test("默认代理开关与模型策略共用存储且互不丢失", async () => {
+  const storage = fakeStorage(enabledPolicy({ general: "provider-a/model-a" }))
+  const { handlers } = await register({ storage, models: CATALOG })
+
+  assert.equal((await handlers.getTeamPolicy({})).defaultAgent, false)
+  const saved = await handlers.setDefaultAgent({ enabled: true })
+  assert.equal(saved.ok, true)
+  assert.equal(saved.defaultAgent, true)
+  assert.deepEqual(storage.map.get(POLICY_KEY), {
+    version: 1,
+    agents: { general: "provider-a/model-a" },
+    defaultAgent: true,
+  })
+
+  await handlers.setAgentModel({ agentID: "qa", model: "provider-a/model-a" })
+  assert.equal((await handlers.getTeamPolicy({})).defaultAgent, true)
+  assert.deepEqual((storage.map.get(POLICY_KEY) as { agents: unknown }).agents, {
+    general: "provider-a/model-a",
+    qa: "provider-a/model-a",
+  })
+})
+
+test("开关与模型覆盖并发保存不会互相覆盖字段", async () => {
+  const storage = fakeStorage(enabledPolicy({}))
+  const { handlers } = await register({ storage, models: CATALOG })
+
+  await Promise.all([
+    handlers.setDefaultAgent({ enabled: true }),
+    handlers.setAgentModel({ agentID: "general", model: "provider-a/model-a" }),
+  ])
+
+  assert.deepEqual(storage.map.get(POLICY_KEY), {
+    version: 1,
+    agents: { general: "provider-a/model-a" },
+    defaultAgent: true,
+  })
+})
+
+test("旧结构缺少 defaultAgent 视为关闭，字段非布尔视为损坏", async () => {
+  const legacy = await register({ storage: fakeStorage(enabledPolicy({})), models: CATALOG })
+  assert.equal((await legacy.handlers.getTeamPolicy({})).defaultAgent, false)
+
+  const broken = await register({
+    storage: fakeStorage({ [POLICY_KEY]: { version: 1, agents: {}, defaultAgent: "yes" } }),
+    models: CATALOG,
+  })
+  const state = await broken.handlers.getTeamPolicy({})
+  assert.equal(state.ok, false)
+  assert.match((state.errors ?? []).join(" "), /corrupt/)
 })

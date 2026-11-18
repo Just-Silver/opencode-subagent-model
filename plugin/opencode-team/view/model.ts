@@ -120,6 +120,13 @@ export function effectTone(effect: PermissionEffect): Tone {
   return "neutral"
 }
 
+export const SETTINGS_ID = "__team-default-agent__"
+
+/** 搜索时只过滤 Agent 行，设置行在空查询下才可选中，避免空格被开关拦截而无法输入。 */
+export function settingsRowVisible(query: string): boolean {
+  return query.trim() === ""
+}
+
 export type ConfigRegion = "models" | "variants"
 
 /** 无 Variant 的模型没有可操作的第二栏，切换区域时始终留在模型列表。 */

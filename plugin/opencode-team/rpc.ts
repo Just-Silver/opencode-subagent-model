@@ -34,8 +34,10 @@ const stateOutput = {
     supported: { type: "boolean" },
     agentsSupported: { type: "boolean" },
     agentsError: { type: "string" },
+    defaultAgent: { type: "boolean" },
     models: agentModels,
     errors: { type: "array", items: { type: "string" } },
+    warnings: { type: "array", items: { type: "string" } },
     conflict,
     migration,
   },
@@ -62,6 +64,17 @@ export const teamRpc = {
       },
       output: stateOutput,
     },
+    setDefaultAgent: {
+      input: {
+        type: "object",
+        properties: {
+          enabled: { type: "boolean" },
+        },
+        required: ["enabled"],
+        additionalProperties: false,
+      },
+      output: stateOutput,
+    },
   },
   events: {},
 } as const
@@ -83,8 +96,10 @@ export interface TeamPolicySummary {
   readonly supported: boolean
   readonly agentsSupported?: boolean
   readonly agentsError?: string
+  readonly defaultAgent?: boolean
   readonly models?: Readonly<Record<string, string>>
   readonly errors?: readonly string[]
+  readonly warnings?: readonly string[]
   readonly conflict?: TeamConflict
   readonly migration?: TeamMigration
 }

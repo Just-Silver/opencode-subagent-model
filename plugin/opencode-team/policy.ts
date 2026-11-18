@@ -91,6 +91,8 @@ export interface TeamPolicyOptions {
   readonly conflict?: TeamConflict
   readonly agentsSupported?: boolean
   readonly agentsError?: string
+  /** 启动时读取默认代理开关失败；面板打开时显式提示，运行期按关闭处理。 */
+  readonly defaultAgentError?: string
   /** Used when the host cannot list agents; the built-ins are enough for a faithful legacy import. */
   readonly fallbackAgents?: readonly string[]
   /**
@@ -103,6 +105,7 @@ export interface TeamPolicyOptions {
 export interface TeamPolicyHandlers {
   getTeamPolicy(input?: unknown): Promise<TeamPolicySummary>
   setAgentModel(input?: unknown): Promise<TeamPolicySummary>
+  setDefaultAgent(input?: unknown): Promise<TeamPolicySummary>
 }
 
 interface MigrationMarker {
@@ -127,19 +130,25 @@ function message(error: unknown): string {
 
 function corruptPolicy(): Error {
   return new Error(
-    `Agent model policy is corrupt: expected { version: ${POLICY_VERSION}, agents: Record<string, string> }.`,
+    `Agent model policy is corrupt: expected { version: ${POLICY_VERSION}, agents: Record<string, string>, defaultAgent?: boolean }.`,
   )
 }
 
-async function readPolicy(storage: TeamPolicyContext["storage"]): Promise<Record<string, string>> {
+interface PolicyState {
+  readonly agents: Record<string, string>
+  readonly defaultAgent: boolean
+}
+
+async function readPolicy(storage: TeamPolicyContext["storage"]): Promise<PolicyState> {
   let raw: unknown
   try {
     raw = await storage.get(POLICY_KEY)
   } catch (error) {
     throw new Error(`Cannot read the agent model policy: ${message(error)}`)
   }
-  if (raw === undefined) return {}
+  if (raw === undefined) return { agents: {}, defaultAgent: false }
   if (!isRecord(raw) || raw.version !== POLICY_VERSION || !isRecord(raw.agents)) throw corruptPolicy()
+  if (raw.defaultAgent !== undefined && typeof raw.defaultAgent !== "boolean") throw corruptPolicy()
   const agents: Record<string, string> = {}
   for (const [agentID, model] of Object.entries(raw.agents)) {
     if (agentID.trim() === "" || typeof model !== "string" || parseModelRef(model) === undefined) {
@@ -147,14 +156,29 @@ async function readPolicy(storage: TeamPolicyContext["storage"]): Promise<Record
     }
     agents[agentID] = model
   }
-  return agents
+  return { agents, defaultAgent: raw.defaultAgent === true }
 }
 
-async function writePolicy(storage: TeamPolicyContext["storage"], agents: Record<string, string>): Promise<void> {
+async function writePolicy(storage: TeamPolicyContext["storage"], state: PolicyState): Promise<void> {
   try {
-    await storage.set(POLICY_KEY, { version: POLICY_VERSION, agents })
+    await storage.set(POLICY_KEY, {
+      version: POLICY_VERSION,
+      agents: state.agents,
+      defaultAgent: state.defaultAgent,
+    })
   } catch (error) {
     throw new Error(`Cannot save the agent model policy: ${message(error)}`)
+  }
+}
+
+/** 启动注册要在 transform 前拿到开关；读取失败按关闭继续，策略读取随后会显式报错。 */
+export async function readDefaultAgentSetting(
+  storage: TeamPolicyContext["storage"],
+): Promise<{ readonly ok: true; readonly value: boolean } | { readonly ok: false; readonly error: string }> {
+  try {
+    return { ok: true, value: (await readPolicy(storage)).defaultAgent }
+  } catch (error) {
+    return { ok: false, error: message(error) }
   }
 }
 
@@ -206,8 +230,8 @@ async function applyPolicy(
   if (!isRecord(event.input)) return
   const agentID = event.input.agent
   if (typeof agentID !== "string" || agentID.trim() === "") return
-  const agents = await readPolicy(ctx.storage)
-  const model = agents[agentID]
+  const policy = await readPolicy(ctx.storage)
+  const model = policy.agents[agentID]
   // Most calls target an agent without an override. Read the policy first so those calls never
   // pay for the legacy-plugin probe.
   if (model === undefined) return
@@ -297,6 +321,7 @@ function unavailable(reason: string, agentsSupported: boolean, agentsError?: str
   return {
     getTeamPolicy: async () => ({ ok: false, supported: false, ...agentState, errors: [reason] }),
     setAgentModel: async () => ({ ok: false, supported: false, ...agentState, errors: [reason] }),
+    setDefaultAgent: async () => ({ ok: false, supported: false, ...agentState, errors: [reason] }),
   }
 }
 
@@ -370,14 +395,14 @@ async function runMigration(
 
   try {
     return await mutatePolicy(async () => {
-      const agents = await readPolicy(ctx.storage)
+      const policy = await readPolicy(ctx.storage)
 
       const imported =
         legacyModel === null
           ? []
-          : (await listSubagentIDs(ctx, fallbackAgents)).filter((agent) => agents[agent] === undefined)
+          : (await listSubagentIDs(ctx, fallbackAgents)).filter((agent) => policy.agents[agent] === undefined)
       if (legacyModel !== null) {
-        for (const agentID of imported) agents[agentID] = legacyModel
+        for (const agentID of imported) policy.agents[agentID] = legacyModel
       }
 
       const marker: MigrationMarker = {
@@ -386,7 +411,7 @@ async function runMigration(
         model: legacyModel,
         agents: imported,
       }
-      if (imported.length > 0) await writePolicy(ctx.storage, agents)
+      if (imported.length > 0) await writePolicy(ctx.storage, policy)
       await writeMarker(ctx.storage, marker)
       return marker
     })
@@ -463,12 +488,16 @@ async function getState(
   }
   try {
     const migrated = await ensureMigration({ conflict })
-    const models = await readPolicy(ctx.storage)
+    const policy = await readPolicy(ctx.storage)
     return {
       ok: true,
       supported: true,
       ...agentState,
-      models,
+      models: policy.agents,
+      defaultAgent: policy.defaultAgent,
+      ...(options.defaultAgentError === undefined
+        ? {}
+        : { warnings: [`默认代理设置读取失败，当前未应用：${options.defaultAgentError}`] }),
       ...(migrated.status === "unavailable" && conflict === undefined ? {} : { migration: migrated }),
       ...(conflict === undefined ? {} : { conflict }),
     }
@@ -535,12 +564,12 @@ async function setAgentModel(
     agents = await mutatePolicy(async () => {
       const next = await readPolicy(ctx.storage)
       if (model === null) {
-        delete next[agentID]
+        delete next.agents[agentID]
       } else {
-        next[agentID] = formatModelRef(ref!)
+        next.agents[agentID] = formatModelRef(ref!)
       }
       await writePolicy(ctx.storage, next)
-      return next
+      return next.agents
     })
   } catch (error) {
     return { ok: false, supported: true, agentsSupported, errors: [message(error)] }
@@ -559,6 +588,44 @@ async function setAgentModel(
     models: agents,
     ...(migrated === undefined || migrated.status === "unavailable" ? {} : { migration: migrated }),
   }
+}
+
+async function setDefaultAgent(
+  ctx: TeamPolicyContext,
+  input: unknown,
+  options: TeamPolicyOptions,
+  currentConflict: () => Promise<TeamConflict | undefined>,
+  ensureMigration: (probe?: MigrationProbe) => Promise<TeamMigration>,
+): Promise<TeamPolicySummary> {
+  const agentsSupported = options.agentsSupported ?? false
+  if (!supportsHook(ctx)) {
+    return {
+      ok: false,
+      supported: false,
+      agentsSupported,
+      errors: ["This host cannot enforce a subagent model."],
+    }
+  }
+  const conflict = await currentConflict()
+  if (conflict !== undefined) return { ...conflictSummary(conflict), agentsSupported }
+  const enabled = isRecord(input) ? input.enabled : undefined
+  if (typeof enabled !== "boolean") {
+    return {
+      ok: false,
+      supported: true,
+      agentsSupported,
+      errors: ["The default agent setting must be a boolean."],
+    }
+  }
+  try {
+    await mutatePolicy(async () => {
+      const policy = await readPolicy(ctx.storage)
+      await writePolicy(ctx.storage, { ...policy, defaultAgent: enabled })
+    })
+  } catch (error) {
+    return { ok: false, supported: true, agentsSupported, errors: [message(error)] }
+  }
+  return getState(ctx, options, currentConflict, ensureMigration)
 }
 
 export async function registerTeamPolicy(
@@ -617,6 +684,8 @@ export async function registerTeamPolicy(
   return {
     getTeamPolicy: () => getState(ctx, options, currentConflict, ensureMigration),
     setAgentModel: (input) => setAgentModel(ctx, input, options, currentConflict, ensureMigration),
+    setDefaultAgent: (input) =>
+      setDefaultAgent(ctx, input, options, currentConflict, ensureMigration),
   }
 }
 

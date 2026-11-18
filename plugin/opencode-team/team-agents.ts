@@ -52,6 +52,7 @@ export const TEAM_AGENTS: readonly TeamAgentDefinition[] = [
 
 export interface TeamAgentEditor {
   get(id: string): { readonly id: string } | undefined
+  default(id: string | undefined): void
   update(
     id: string,
     update: (agent: {
@@ -76,7 +77,10 @@ export interface TeamAgentRegistration {
   readonly error?: string
 }
 
-export async function registerTeamAgents(ctx: TeamAgentContext): Promise<TeamAgentRegistration> {
+export async function registerTeamAgents(
+  ctx: TeamAgentContext,
+  options: { readonly defaultAgent?: () => boolean } = {},
+): Promise<TeamAgentRegistration> {
   const transform = ctx.agent?.transform
   if (typeof transform !== "function") {
     return { supported: false, error: "This host cannot register agents at runtime." }
@@ -90,9 +94,20 @@ export async function registerTeamAgents(ctx: TeamAgentContext): Promise<TeamAge
           agent.mode = definition.mode
           agent.system = definition.system
           agent.hidden = false
-          agent.permissions.push(...definition.permissions)
+          // 正常 reload 会重建 Agent 状态；这里防御同一 editor 被重复应用时规则累积。
+          for (const rule of definition.permissions) {
+            const exists = agent.permissions.some(
+              (current) =>
+                current.action === rule.action &&
+                current.resource === rule.resource &&
+                current.effect === rule.effect,
+            )
+            if (!exists) agent.permissions.push(rule)
+          }
         })
       }
+      // reload 会重跑 transform；用 getter 读当前设置，开关切换后无需重建注册。
+      if (options.defaultAgent?.() === true) editor.default("orchestrator")
     })
   } catch (error) {
     return {

@@ -176,3 +176,52 @@ test("三份 System Prompt 明确职责边界", () => {
   assert.match(byID.get("reviewer")!.system, /默认保持审查独立性/)
   assert.match(byID.get("reviewer")!.system, /待验证/)
 })
+
+test("reload 重放 transform 不会重复追加叶子子代理的拒绝规则", async () => {
+  const target = editor()
+  const apply = () =>
+    registerTeamAgents({
+      agent: {
+        transform: async (callback) => {
+          callback(target.editor)
+          return { dispose: async () => {} }
+        },
+      },
+    })
+
+  await apply()
+  await apply()
+  const leaf = [
+    { action: "question", resource: "*", effect: "deny" },
+    { action: "subagent", resource: "*", effect: "deny" },
+  ]
+  assert.deepEqual(target.agents.get("qa")?.permissions, leaf)
+  assert.deepEqual(target.agents.get("reviewer")?.permissions, leaf)
+})
+
+test("用户开启开关后把 Orchestrator 设为默认代理，关闭时不设置", async () => {
+  const applied: Array<string | undefined> = []
+  const target = editor()
+  ;(target.editor as { default?: (id: string | undefined) => void }).default = (id) => {
+    applied.push(id)
+  }
+
+  const run = async (enabled: boolean) => {
+    await registerTeamAgents(
+      {
+        agent: {
+          transform: async (callback) => {
+            callback(target.editor)
+            return { dispose: async () => {} }
+          },
+        },
+      },
+      { defaultAgent: () => enabled },
+    )
+  }
+
+  await run(false)
+  assert.deepEqual(applied, [])
+  await run(true)
+  assert.deepEqual(applied, ["orchestrator"])
+})

@@ -21,6 +21,7 @@ export interface TeamDashboardData {
   readonly warning?: string
   readonly agentsSupported: boolean
   readonly agentsError?: string
+  readonly defaultAgent: boolean
 }
 
 export type LoadTeamDashboardResult =
@@ -36,6 +37,7 @@ export interface ModelSelectionResult {
   readonly tone: FeedbackTone
   readonly message: string
   readonly models?: Readonly<Record<string, string>>
+  readonly defaultAgent?: boolean
 }
 
 export function currentLocation(ctx: Context): NonNullable<Context["location"]> {
@@ -74,6 +76,11 @@ export async function loadTeamDashboard(
     known: true,
   }))
 
+  const warnings = [
+    ...(agents.warning === undefined ? [] : [agents.warning]),
+    ...(summary.warnings ?? []),
+  ]
+
   return {
     kind: "ready",
     data: {
@@ -82,9 +89,10 @@ export async function loadTeamDashboard(
       models: models.models,
       providers,
       ...(models.error === undefined ? {} : { modelError: models.error }),
-      ...(agents.warning === undefined ? {} : { warning: agents.warning }),
+      ...(warnings.length === 0 ? {} : { warning: warnings.join("；") }),
       agentsSupported: summary.agentsSupported ?? false,
       ...(summary.agentsError === undefined ? {} : { agentsError: summary.agentsError }),
+      defaultAgent: summary.defaultAgent === true,
     },
   }
 }
@@ -255,6 +263,42 @@ async function saveModel(
           : `已清除 ${agentName} 的团队覆盖，回到 Agent 配置的 ${hostModel}`
         : `${agentName} 的子代理模型已设为 ${result.models?.[agentID] ?? model}`,
     ...(result.models === undefined ? {} : { models: result.models }),
+  }
+}
+
+export async function setDefaultAgent(
+  ctx: Context,
+  location: Location,
+  enabled: boolean,
+): Promise<ModelSelectionResult> {
+  let result: TeamPolicySummary
+  try {
+    result = (await ctx.client.rpc(teamRpc).setDefaultAgent({ enabled }, { location })) as TeamPolicySummary
+  } catch (error) {
+    return {
+      saved: false,
+      tone: "error",
+      message: `保存默认代理设置失败：${message(error)}`,
+    }
+  }
+  if (!result.ok || result.defaultAgent === undefined) {
+    return {
+      saved: false,
+      tone: "error",
+      message: `保存默认代理设置失败：${summarize(result)}`,
+    }
+  }
+  const warnings = result.warnings ?? []
+  return {
+    saved: true,
+    tone: warnings.length > 0 ? "warning" : "success",
+    message:
+      warnings.length > 0
+        ? warnings.join("；")
+        : result.defaultAgent
+          ? "已开启：新会话默认使用 Orchestrator（若配置了 default_agent 仍以配置为准）。"
+          : "已关闭：新会话默认代理跟随 OpenCode 配置。",
+    defaultAgent: result.defaultAgent,
   }
 }
 

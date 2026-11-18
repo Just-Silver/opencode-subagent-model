@@ -46,7 +46,11 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
 ## 存储与模型格式
 
 - 唯一事实源为服务端 `ctx.storage`，逻辑键 `team-policy`。
-- 值为 `{ "version": 1, "agents": { "<agentID>": "<model>" } }`。
+- 值为 `{ "version": 1, "agents": { "<agentID>": "<model>" }, "defaultAgent": true | false }`。
+- `defaultAgent` 是 `/team` 面板的「默认代理」开关，与模型覆盖共用同一键；旧值缺少该字段时
+  按 `false` 读取，字段存在但不是布尔值时按损坏处理。保存模型会保留该字段，切换开关也会保留
+  全部模型覆盖。
+- 版本号仍为 `1`；降级到不认识该字段的旧版本后保存模型会丢掉开关，需要重新开启。
 - `<model>` 为 `providerID/modelID` 或 `providerID/modelID#variant`；模型 ID 自身可包含 `/`，
   因此只在第一个 `/` 分隔供应商。
 - 键存在表示启用覆盖；删除该 Agent 的键表示恢复 OpenCode 原生选择。没有 `null` 占位值。
@@ -149,7 +153,8 @@ providers 拆分出旧独立插件的历史见[独立迁移计划](./extraction-
 - `packages/core/src/plugin/supervisor.ts`：重复插件 ID 会被记为失败；外部插件在 `pre`，
   配置 Agent 插件在 `post`，因此用户 Agent 配置覆盖插件默认值。
 - `packages/core/src/agent.ts`：默认主代理依次取 `data.default`、内置 `build`、首个可选 primary；
-  本插件不调用 `editor.default`，所以不会抢占默认主代理。
+  本插件默认不调用 `editor.default`。只有用户在 `/team` 面板显式开启「默认代理」开关时，才在
+  transform 中设置 `orchestrator`；配置 Agent 插件在 `post` 运行，用户 `default_agent` 仍优先。
 - `packages/core/src/plugin.ts` 与 `packages/core/src/state.ts`：每个插件有独立 activation scope，
   卸载时关闭 scope，`agent.transform` 的 finalizer 会移除团队成员。
 - `packages/core/src/plugin/host.ts` 的 `rpc.client` 与 `packages/core/src/rpc.ts` 的 `call`：

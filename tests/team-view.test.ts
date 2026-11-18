@@ -23,6 +23,7 @@ import {
   promptInfo,
   resolveModel,
   roleLabel,
+  settingsRowVisible,
   statusTone,
   summarizePermissions,
   variantsFor,
@@ -34,6 +35,7 @@ import {
   refreshModels,
   restoreAgentModel,
   saveAgentModel,
+  setDefaultAgent,
 } from "../plugin/opencode-team/view/team.ts"
 
 const POLICY_KEY = "team-policy"
@@ -161,6 +163,7 @@ interface HarnessInput {
   readonly getThrows?: Error
   readonly conflict?: TeamPolicyOptions["conflict"]
   readonly agentsSupported?: boolean
+  readonly defaultAgentError?: string
   readonly agentsSyncError?: boolean
   readonly agentsCache?: boolean
   readonly agentsListError?: boolean
@@ -203,6 +206,9 @@ async function harness(input: HarnessInput) {
   const handlers = await registerTeamPolicy(policyContext, {
     conflict: input.conflict,
     agentsSupported: input.agentsSupported ?? true,
+    ...(input.defaultAgentError === undefined
+      ? {}
+      : { defaultAgentError: input.defaultAgentError }),
   })
 
   const ctx: any = {
@@ -217,6 +223,10 @@ async function harness(input: HarnessInput) {
         setAgentModel: async (value: unknown, options?: { location?: unknown }) => {
           calls.setLocations.push(options?.location)
           return handlers.setAgentModel(value)
+        },
+        setDefaultAgent: async (value: unknown, options?: { location?: unknown }) => {
+          calls.setLocations.push(options?.location)
+          return handlers.setDefaultAgent(value)
         },
       }),
     },
@@ -562,6 +572,7 @@ test("保存无变体模型后写入完整引用", async () => {
   assert.deepEqual(h.storage.map.get(POLICY_KEY), {
     version: 1,
     agents: { qa: "provider-b/beta" },
+    defaultAgent: false,
   })
   assert.equal(h.calls.toast.length, 0)
   assert.ok(h.calls.setLocations.every((location) => location === CURRENT_LOCATION))
@@ -573,6 +584,7 @@ test("保存指定变体时写入 #variant，默认变体只写基础引用", as
   assert.deepEqual(variant.storage.map.get(POLICY_KEY), {
     version: 1,
     agents: { reviewer: "provider-a/alpha#low" },
+    defaultAgent: false,
   })
 
   const base = await harness({})
@@ -580,6 +592,7 @@ test("保存指定变体时写入 #variant，默认变体只写基础引用", as
   assert.deepEqual(base.storage.map.get(POLICY_KEY), {
     version: 1,
     agents: { qa: "provider-a/alpha" },
+    defaultAgent: false,
   })
 })
 
@@ -595,7 +608,11 @@ test("清除团队覆盖后回到 Agent 配置", async () => {
   assert.equal(result.saved, true)
   assert.equal(result.tone, "success")
   assert.match(result.message, /Agent 配置/)
-  assert.deepEqual(h.storage.map.get(POLICY_KEY), { version: 1, agents: {} })
+  assert.deepEqual(h.storage.map.get(POLICY_KEY), {
+    version: 1,
+    agents: {},
+    defaultAgent: false,
+  })
 })
 
 test("主代理与失效 Agent 拒绝写入新模型，但仍允许清除旧覆盖", async () => {
@@ -621,11 +638,18 @@ test("主代理与失效 Agent 拒绝写入新模型，但仍允许清除旧覆�
   assert.equal(unknownResult.tone, "warning")
   assert.match(unknownResult.message, /当前目录不可用/)
   assert.equal(unknown.calls.toast.length, 0)
-  assert.deepEqual(unknown.storage.map.get(POLICY_KEY), { version: 1, agents: { removed: "provider-a/alpha" } })
+  assert.deepEqual(unknown.storage.map.get(POLICY_KEY), {
+    version: 1,
+    agents: { removed: "provider-a/alpha" },
+  })
 
   const cleared = await saveAgentModel(unknown.ctx, CURRENT_LOCATION, missing, null)
   assert.equal(cleared.saved, true)
-  assert.deepEqual(unknown.storage.map.get(POLICY_KEY), { version: 1, agents: {} })
+  assert.deepEqual(unknown.storage.map.get(POLICY_KEY), {
+    version: 1,
+    agents: {},
+    defaultAgent: false,
+  })
 })
 
 test("保存失败时返回错误反馈，旧设置保持不变", async () => {
@@ -751,7 +775,11 @@ test("恢复模型覆盖而不经过选择框", async () => {
   const result = await restoreAgentModel(h.ctx, CURRENT_LOCATION, agent)
   assert.equal(result.saved, true)
   assert.equal(result.tone, "success")
-  assert.deepEqual(h.storage.map.get(POLICY_KEY), { version: 1, agents: {} })
+  assert.deepEqual(h.storage.map.get(POLICY_KEY), {
+    version: 1,
+    agents: {},
+    defaultAgent: false,
+  })
   assert.deepEqual(h.calls.setLocations, [CURRENT_LOCATION])
   assert.equal(h.calls.toast.length, 0)
 })
@@ -810,4 +838,32 @@ test("搜索过滤后选中项落到可见模型，无结果时不保留不可�
   assert.equal(firstVisibleRef([ALPHA, BETA], "provider-b/beta"), "provider-b/beta")
   assert.equal(firstVisibleRef([ALPHA], "provider-b/beta"), "provider-a/alpha")
   assert.equal(firstVisibleRef([], "provider-b/beta"), undefined)
+})
+
+test("设置行只在空查询下可选，搜索时不拦截空格输入", () => {
+  assert.equal(settingsRowVisible(""), true)
+  assert.equal(settingsRowVisible("   "), true)
+  assert.equal(settingsRowVisible("qa"), false)
+})
+
+test("默认代理设置通过 RPC 保存并返回新状态", async () => {
+  const h = await harness({})
+  const result = await setDefaultAgent(h.ctx, CURRENT_LOCATION, true)
+  assert.equal(result.saved, true)
+  assert.equal(result.defaultAgent, true)
+  assert.match(result.message, /Orchestrator/)
+  assert.deepEqual(h.storage.map.get(POLICY_KEY), {
+    version: 1,
+    agents: {},
+    defaultAgent: true,
+  })
+})
+
+test("启动读取默认代理失败时面板显示告警", async () => {
+  const h = await harness({ defaultAgentError: "storage unavailable" })
+  const result = await loadTeamDashboard(h.ctx, CURRENT_LOCATION)
+  assert.equal(result.kind, "ready")
+  if (result.kind === "ready") {
+    assert.match(result.data.warning ?? "", /默认代理设置读取失败/)
+  }
 })

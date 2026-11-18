@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+### Added
+
+- `/team` 面板新增「默认代理」开关：选中列表顶部的设置行后按 `空格`，可把 Orchestrator 设为
+  新会话默认代理；开关与模型覆盖共用 `team-policy` 存储，用户 `default_agent` 配置优先。
+
 ## [0.2.3] - 2026-11-18
 
 ### Added

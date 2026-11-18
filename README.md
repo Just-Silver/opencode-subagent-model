@@ -1,9 +1,18 @@
-<!-- 职责：使用者的安装、团队用法、按 Agent 模型配置、迁移与疑难解答；不写：内部实现、发版流程、完整设计契约。 -->
+<!-- 职责：使用者的项目介绍、特性、安装、快速开始、日常使用、迁移与疑难解答；不写：Agent 规则、权限与策略实现、开发发版流程、设计契约。 -->
 
 # opencode-team
 
 给 OpenCode V2 提供零配置的多 Agent 团队：Orchestrator、QA、Reviewer 开箱即用，
 并可按 Agent 单独指定子代理模型与变体。可选择当前目录可用的任意聊天模型，不依赖供应商插件。
+
+## 特性
+
+- **零配置团队**：安装即获得 Orchestrator 主代理，以及 QA、Reviewer 两个子代理；复用内置
+  `general`、`explore`，不需要手写 Agent 文件。
+- **按 Agent 覆盖模型**：只对指定 Agent ID 的子代理生效；没配置的 Agent 继续使用 OpenCode 原生选择。
+- **可视化管理**：`/team` 面板查看角色、模型来源、权限摘要与完整 System Prompt，并在面板内改模型与变体。
+- **随时可逆**：清除团队覆盖后回到 Agent 配置或 OpenCode 原生选择。
+- **失败可见**：模型不可用、存储损坏或读取失败都明确报错，不静默回退。
 
 ## 安装
 
@@ -17,71 +26,51 @@ opencode plugin add @justsilver/opencode-team
 也可以从本地源码目录加载：在 `plugins` 里给插件目录的绝对路径，
 例如 `{ "package": "<仓库>/plugin/opencode-team" }`。两种方式同一个插件 ID，不要同时启用。
 
+## 快速开始
+
+1. 安装并完全退出、重新启动 OpenCode。
+2. 输入 `/` 选择 `/team`，或在命令面板搜索「Agent 团队与模型」。
+3. 用方向键选一个子代理（如 QA），按 `Enter` 打开模型配置。
+4. 选择模型；如果该模型有变体，先按 `Enter` 选思考等级，再按 `Enter` 保存。
+5. 之后 Orchestrator 派发子代理时，被配置的 Agent 会自动使用团队模型。
+
 ## 团队 Agent
 
-安装后自动获得：
+| Agent | 类型 | 职责 |
+|---|---|---|
+| `Orchestrator` | 主代理 | 优先编排，简单任务可直接执行，协调子代理并完成最终交付 |
+| `QA` | 子代理 | 独立设计、编写并执行验收测试；不迎合实现修改验收标准 |
+| `Reviewer` | 子代理 | 默认只审查和报告；必要时做针对性验证，不替代 QA 验收 |
+| `General` | 内置子代理 | 通用多步任务，由 Orchestrator 复用 |
+| `Explore` | 内置子代理 | 代码库探索 |
 
-- `Orchestrator`（主代理）：按需调度、协调子代理并完成最终交付；可以直接执行任务。
-  它不会自动变成默认主代理，用 OpenCode 的 Agent 切换选择它，或在配置中设置
+- Orchestrator 不会自动成为默认主代理；用 OpenCode 的 Agent 切换选择它，或设置
   `default_agent: "orchestrator"`。
-- `QA`（子代理）：独立设计、编写及执行验收测试并报告证据；不迎合实现修改验收标准；
-  修改生产代码需明确授权。
-- `Reviewer`（子代理）：默认只审查和报告；可做针对性验证但不替代 QA 验收；
-  修改生产代码需明确授权。
-- 继续复用内置 `general`、`explore`；不重复实现已有能力，也不修改它们的权限。
+- QA 与 Reviewer 是叶子子代理：不能向用户提问，也不能再派发下级子代理。
+- 其余权限继承 OpenCode 默认值与你在 `opencode.json` 中的配置；要加硬限制请配置对应 Agent 权限。
 
-插件给 QA / Reviewer 注入 `question * deny` 与 `subagent * deny`，让它们成为不向用户提问、也不再派生下级子代理的叶子子代理：
+角色职责与提示词边界见[团队 Agent](docs/team-agents.md)。
 
-- Orchestrator 不追加权限规则。
-- QA / Reviewer 除 `question`、`subagent` 外，其余权限继承 OpenCode 默认与用户配置。
-- General、Explore 保持内置定义，插件不修改。
-- 职责边界由 System Prompt 约束：
-  - Orchestrator 优先编排，简单任务可直接执行，协调并发写入与共享文件冲突，
-    整合子代理结论并对最终交付负责。
-  - QA 独立设计、编写及执行验收测试，不迎合实现修改验收标准；生产代码修复交由实现代理，
-    自身修复后不得自验。
-  - Reviewer 默认只审查和报告；可做针对性验证但不替代 QA 的独立验收；
-    确需直接修复时，明确区分审查结果与后续修改。
-- 这不是权限沙箱；需要硬限制时请在 `opencode.json` 配置对应 Agent 权限。
-- 项目/全局 Agent 配置在插件之后合并，可以收紧或放开权限。
+## 团队面板
 
-详细职责、合并顺序与客观验证要求见[团队 Agent](docs/team-agents.md#system-prompt-职责)。
+- 左侧列出团队 Agent 与自定义子代理，每行显示状态：原生、继承或自定义；自定义额外显示当前模型。
+- 右侧显示角色说明、当前模型、权限摘要与只读 System Prompt；提示词完整展示，不提供编辑。
+- 搜索框常驻并默认聚焦，直接输入即过滤；方向键选择，`Enter` 打开模型配置，`Ctrl+R` 清除团队覆盖，
+  `ESC` 返回或关闭。
+- 模型配置按 Provider 分组：`←`/`→` 与 `Tab` 切换区域和变体，`Enter` 选择并保存，
+  `Ctrl+R` 恢复原生；保存结果与错误都显示在当前面板内。
+- 窄终端自动切换为列表/详情或模型/Variant 单栏。
 
-## Agent Team Dashboard
+使用规则：
 
-在输入框输入 `/`，选择 `/team`，或在命令面板搜索「Agent 团队与模型」。
-
-- 左侧列出团队 Agent：Orchestrator、General、Explore、QA、Reviewer，以及自定义子代理；
-  每行显示状态（原生 / 继承 / 自定义），自定义模型额外显示当前模型。
-- 右侧显示角色说明、当前模型、权限摘要和只读 System Prompt；提示词直接完整展示。
-- 顶部搜索框常驻并默认聚焦，直接输入即过滤；方向键选择，`Enter` 打开模型配置，
-  `Ctrl+R` 清除团队覆盖，`ESC` 返回或关闭。
-- 模型配置在同一视图内按 Provider 分组展示模型，搜索框默认聚焦、直接输入即过滤；
-  `←`/`→` 与 `Tab` 区域切换、Variant；有 Variant 时先按 `Enter` 选择思考等级，再按 `Enter`
-  保存；保存后停留在配置页，取消不修改已有配置；
-  `Ctrl+R` 恢复原生/清除团队覆盖。
-- 保存结果、错误和恢复确认都在当前面板内显示，不再弹出可能被遮挡的宿主 Toast。
-- 窄终端会自动切换为列表/详情或模型/Variant 单栏，低高度使用紧凑行。
-
-模型规则：
-
-- 设置按 Agent ID 精确匹配；未配置的 Agent 继续使用 OpenCode 原生选择。
+- 设置按 Agent ID 精确匹配，在同一 OpenCode 服务端数据库下全局共享，重启后保留。
 - 主代理（包括 Orchestrator）的模型始终由 OpenCode 会话选择，面板只读展示。
-- 在模型配置中按 `Ctrl+R` 会删除团队覆盖；如果该 Agent 在 `opencode.json` 配置了模型，
-  则回到该 Agent 配置。
-- 设置在同一 OpenCode 服务端数据库下全局共享，重启后保留；保存后对后续调用生效。
-- 命中策略时，无论调用方是否显式指定其他模型，启动与续接调用都会被覆盖。
-- 模型不可用或存储读取失败时明确报错，不静默回退。
-- 子代理启动确认末尾附本次模型标记；格式与边界见[策略契约](docs/team-policy.md#主代理知情边界)。
-
-System Prompt 与权限：
-
-- 提示词来自宿主当前生效的 Agent 定义，只读；General 等没有独立 System Prompt 的 Agent
-  会明确显示“宿主未提供”，插件不会生成或补全内容。
-- 权限摘要按宿主合并后的规则计算，只是效果摘要，不代表权限沙箱；需要硬限制时请在
-  `opencode.json` 配置对应 Agent 权限。
+- 清除团队覆盖后，如果该 Agent 在 `opencode.json` 配了模型，会回到该配置。
+- 子代理启动确认末尾会附本次生效的模型标记，便于确认策略是否生效。
 
 当前版本不提供 Agent 创建、删除、重命名或 Prompt 编辑。
+
+界面细节与键盘契约见 [TUI Dashboard](docs/team-tui.md)。
 
 ## 从旧版插件迁移
 
@@ -111,6 +100,7 @@ System Prompt 与权限：
 | 提示功能不可用 | 当前宿主缺少工具钩子，或钩子注册失败；不会假装保存成功 |
 | 当前模型不可用 | 切到可用模型或恢复原生选择；不会静默换成其他模型 |
 | 命令重复或覆盖冲突 | 检查是否同时启用了旧包、本地目录和 npm 两份 |
+| 面板能打开但按键、搜索、点击都不生效 | 插件目录被装进了自带的 `solid-js` / `@opentui/*` 副本，与宿主运行时冲突；升级到修复后的版本即可，不要手动补装这些依赖 |
 
-开发与发布见 [CONTRIBUTING.md](CONTRIBUTING.md)，设计契约见[策略](docs/team-policy.md)与
-[团队 Agent](docs/team-agents.md)。
+开发与发布见 [CONTRIBUTING.md](CONTRIBUTING.md)，Agent 协作规范见 [AGENTS.md](AGENTS.md)，
+设计契约见[策略](docs/team-policy.md)与[团队 Agent](docs/team-agents.md)。

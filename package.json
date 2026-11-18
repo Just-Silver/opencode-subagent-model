@@ -1,6 +1,6 @@
 {
   "name": "@justsilver/opencode-team",
-  "version": "0.2.1",
+  "version": "0.2.2-beta.0",
   "type": "module",
   "description": "Zero-config multi-agent team for OpenCode V2: Orchestrator, QA, Reviewer, and per-agent subagent model/variant policy",
   "license": "MIT",

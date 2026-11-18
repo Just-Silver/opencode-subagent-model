@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.2.2-beta.0] - 2026-11-18
+
 ### Changed
 
 - 旧包 `@justsilver/opencode-subagent-model` 已在 npm 标记 deprecated（覆盖全部已发布版本），

@@ -64,8 +64,8 @@ README、LICENSE 由 npm 自动收录。
 
 TUI 必须发布预编译产物：npm 插件位于 `node_modules`，宿主不会转换该路径下的 `.tsx`
 （anomalyco/opencode#39986），保留 JSX 会出现“首帧渲染后不重绘”或“找不到 `@opentui/solid`”。
-`prepack` 会运行 `npm run build:tui`，`exports["./tui"]` 指向 `dist/tui.js`；构建细节见
-[TUI Dashboard](docs/team-tui.md#构建)。
+`prepack` 会先校验角色提示词生成物（`npm run check:prompts`），再运行 `npm run build:tui`；
+`exports["./tui"]` 指向 `dist/tui.js`，构建细节见 [TUI Dashboard](docs/team-tui.md#构建)。
 
 `@opentui/core`、`@opentui/solid`、`solid-js` 声明为 **optional** peerDependencies
 （`peerDependenciesMeta`）：编译产物用普通 import 引用它们，宿主的运行时改写会指向宿主实例，
@@ -90,6 +90,20 @@ npm 不应再装一份副本。发版后装到空目录，确认 `node_modules` 
 | 手动 Run workflow（`publish=true` [+ 正式版需 `stable=true`]） | 发布当前版本，并补建 tag 与 Release |
 
 预发布版本号含 `-` 才会发到 `next`；`package.json` 版本与 tag 不一致会在校验步骤直接失败。
+
+### 发版清单
+
+1. 确定版本号（维护者决定）：beta 用 `X.Y.Z-beta.N`，正式版去掉后缀。
+2. 改 `package.json` 与 `CHANGELOG.md` 顶部并保持一致；用户可见变化写进对应章节。
+3. 本地跑完 [验证要求](AGENTS.md#验证要求)。`npm run build:tui` 必须通过，`dist/` 是生成物，不提交。
+4. 提交并推 `main`，等 CI 全绿。
+5. beta：推 `vX.Y.Z-beta.N` tag，自动发到 `next`；正式版：Actions → Release → Run workflow，
+   勾 `publish` + `stable`，发到 `latest`。
+6. 发布后核对 `npm view @justsilver/opencode-team dist-tags`、tarball 含 `dist/tui.js`、空目录安装后
+   `node_modules` 里只有插件本体。
+7. 安装验收通过后才发正式版。已发布版本不可覆盖，出问题就递增 beta 序号重发。
+8. 本机插件缓存可能仍指向旧版本，必要时删除 `~/.cache/opencode/npm/@justsilver/opencode-team@next`
+   再完全重启。
 
 ### 首次发布（人工一次）
 

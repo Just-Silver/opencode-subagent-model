@@ -18,9 +18,15 @@
 
 `general`、`explore` 完全复用 OpenCode 内置定义；本插件不添加、不修改它们的权限。
 
-## System Prompt 职责
+## System Prompt 来源
 
-`plugin/opencode-team/prompts.ts` 中的三份 System Prompt 明确职责边界：
+`plugin/opencode-team/prompts/` 下的 Markdown 是 Agent 描述与提示词的唯一来源：Frontmatter 的
+`description` 映射到注册 Agent 的 `description`，正文原样映射到 `system`。
+`scripts/build-prompts.mjs` 在构建阶段解析并生成 `prompts.generated.ts`；运行时只加载生成物，
+不读取 Markdown。修改后运行 `npm run build:prompts`，并用 `npm run check:prompts`（CI 与
+`prepack` 会执行）确认生成物已同步；生成文件不要手改。
+
+三份提示词明确职责边界：
 
 - **Orchestrator**：优先编排；简单任务可以直接执行；协调并发写入和共享文件冲突，
   避免多个 Agent 同时修改同一文件或工作区；会改变工作区的 Git 操作按同一原则串行。
@@ -32,8 +38,8 @@
 - **Reviewer**：默认只审查和报告；必要时可运行针对性验证，但不替代 QA 对行为的独立验收；
   确需直接修复时，明确区分审查结果与后续修改。
 
-完整提示词按角色分列在 [`docs/角色提示词/`](./角色提示词/)；改提示词只改 `prompts.ts`，
-该目录是同步的设计稿。
+角色元数据（ID、名称、模式）与注册、权限逻辑仍在 `team-agents.ts`，Markdown 只承载
+`description` 与 System Prompt。
 
 职责边界主要靠 System Prompt，不是权限沙箱；插件只额外给两个子代理注入 `question` 与
 `subagent` 两条硬性拒绝，其余工具权限来自 OpenCode 默认值和用户配置。

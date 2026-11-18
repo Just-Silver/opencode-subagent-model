@@ -26,6 +26,8 @@ jobs:
         run: npm install --no-audit --no-fund --no-package-lock
       - name: 版本一致性（package.json == CHANGELOG 顶部）
         run: node scripts/changelog.mjs check
+      - name: 角色提示词与生成物同步
+        run: npm run check:prompts
       - name: 类型检查
         run: npm run typecheck
       - name: 单测

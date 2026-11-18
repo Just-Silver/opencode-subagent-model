@@ -7,6 +7,13 @@
 
 ## [Unreleased]
 
+### Changed
+
+- 角色提示词改以 `plugin/opencode-team/prompts/*.md` 为唯一来源：Frontmatter 的 `description`
+  作为 Agent 描述、正文作为 System Prompt，构建阶段生成 `prompts.generated.ts`；
+  `npm run check:prompts`（CI 与 `prepack`）阻止生成物与 Markdown 漂移。提示词内容、
+  Agent 职责、权限与模型策略未变。
+
 ## [0.2.2-beta.2] - 2026-11-18
 
 ### Fixed

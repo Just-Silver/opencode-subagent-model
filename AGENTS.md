@@ -49,6 +49,7 @@ npm 包名 `@justsilver/opencode-team`。
 ```text
 npm install --no-package-lock
 npm run typecheck
+npm run check:prompts
 npm run build:tui
 node --test
 node scripts/changelog.mjs check
@@ -70,7 +71,7 @@ CI 与 Release 工作流执行同一组检查，见 [CONTRIBUTING](CONTRIBUTING.
 | `AGENTS.md` | agent：硬约束、工作流程、验证要求、本表 | 使用教程、完整设计、发版操作步骤 |
 | `docs/team-policy.md` | 开发者：Agent 注册、按 Agent 模型策略、存储、迁移、冲突与执行边界 | 安装步骤、角色细节、发布历史 |
 | `docs/team-tui.md` | 开发者：TUI Dashboard 架构、数据来源、状态语义、键盘与渲染验证 | 安装教程、模型存储契约、发布流程 |
-| `docs/team-agents.md` | 开发者：Orchestrator/QA/Reviewer 角色、提示词占位、权限边界 | 模型存储契约、发版流程 |
-| `docs/角色提示词/` | 设计稿：按角色拆分的 System Prompt 全文（Orchestrator/QA/Reviewer） | 运行期文本与加载方式（单一来源 `plugin/opencode-team/prompts.ts`） |
+| `docs/team-agents.md` | 开发者：Orchestrator/QA/Reviewer 角色、提示词来源与职责、权限边界 | 模型存储契约、发版流程 |
+| `plugin/opencode-team/prompts/` | 提示词唯一来源：按角色拆分的 `description`（Frontmatter）与 System Prompt 正文 | 注册、权限与模型策略 |
 | `docs/extraction-plan.md` | 实现者：旧独立插件迁移历史与验收记录 | 当前契约、使用教程 |
 | `CHANGELOG.md` | 用户：版本变更历史 | 完整设计与流程 |

@@ -1,4 +1,4 @@
-import { ORCHESTRATOR_PROMPT, QA_PROMPT, REVIEWER_PROMPT } from "./prompts.ts"
+import { ORCHESTRATOR_PROMPT, QA_PROMPT, REVIEWER_PROMPT } from "./prompts.generated.ts"
 
 export { TEAM_SUBAGENT_IDS } from "./team-ids.ts"
 
@@ -27,28 +27,25 @@ export const TEAM_AGENTS: readonly TeamAgentDefinition[] = [
   {
     id: "orchestrator",
     name: "Orchestrator",
-    description:
-      "Primary team lead responsible for end-to-end delivery. Dynamically delegates or executes tasks, coordinates parallel work and Git operations, reconciles agent findings, and owns final decisions and verification.",
+    description: ORCHESTRATOR_PROMPT.description,
     mode: "primary",
-    system: ORCHESTRATOR_PROMPT,
+    system: ORCHESTRATOR_PROMPT.system,
     permissions: [],
   },
   {
     id: "qa",
     name: "QA",
-    description:
-      "Independent quality assurance agent. Designs and executes acceptance and regression tests against requirements and contracts, investigates failures, and independently verifies fixes. Production code changes require explicit authorization.",
+    description: QA_PROMPT.description,
     mode: "subagent",
-    system: QA_PROMPT,
+    system: QA_PROMPT.system,
     permissions: LEAF_SUBAGENT_PERMISSIONS,
   },
   {
     id: "reviewer",
     name: "Reviewer",
-    description:
-      "Independent code reviewer. Primarily reviews source code for correctness, architecture, and risks, using targeted verification when needed. Reports evidence-based findings without replacing QA acceptance testing. Production code changes require explicit authorization.",
+    description: REVIEWER_PROMPT.description,
     mode: "subagent",
-    system: REVIEWER_PROMPT,
+    system: REVIEWER_PROMPT.system,
     permissions: LEAF_SUBAGENT_PERMISSIONS,
   },
 ]

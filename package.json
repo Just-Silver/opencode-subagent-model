@@ -32,8 +32,10 @@
   "scripts": {
     "test": "node --test",
     "typecheck": "tsc --noEmit",
+    "build:prompts": "node scripts/build-prompts.mjs gen",
+    "check:prompts": "node scripts/build-prompts.mjs check",
     "build:tui": "node scripts/build-tui.mjs",
-    "prepack": "node scripts/build-tui.mjs"
+    "prepack": "node scripts/build-prompts.mjs check && node scripts/build-tui.mjs"
   },
   "peerDependencies": {
     "@opentui/core": ">=0.8.4 <0.9.0",

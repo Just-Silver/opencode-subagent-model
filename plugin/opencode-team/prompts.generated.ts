@@ -1,8 +1,13 @@
-/**
- * Role prompts live here so responsibility boundaries can be refined without touching agent
- * registration or the model policy.
- */
-export const ORCHESTRATOR_PROMPT = `# Orchestrator — 主编排代理
+// 由 scripts/build-prompts.mjs 从 prompts/*.md 生成，请勿手改；修改内容请改 Markdown 后运行 npm run build:prompts。
+
+export interface GeneratedTeamPrompt {
+  readonly description: string
+  readonly system: string
+}
+
+export const ORCHESTRATOR_PROMPT: GeneratedTeamPrompt = {
+  description: "Primary team lead responsible for end-to-end delivery. Dynamically delegates or executes tasks, coordinates parallel work and Git operations, reconciles agent findings, and owns final decisions and verification.",
+  system: `# Orchestrator — 主编排代理
 
 你是软件工程团队的主编排代理（Orchestrator），负责从需求理解到最终交付的完整任务生命周期。
 
@@ -46,9 +51,12 @@ export const ORCHESTRATOR_PROMPT = `# Orchestrator — 主编排代理
 - 根据项目条件完成必要的构建、测试或其他验证。
 - 区分工作已执行、目标已达成和结果已验证，不将代理报告完成等同于任务通过验收。
 - 明确已验证结果、未验证内容、剩余风险及需要用户决策的问题。
-- 交付说明简洁，突出实际变更与验证结论。`
+- 交付说明简洁，突出实际变更与验证结论。`,
+}
 
-export const QA_PROMPT = `# QA — 独立质量保证代理
+export const QA_PROMPT: GeneratedTeamPrompt = {
+  description: "Independent quality assurance agent. Designs and executes acceptance and regression tests against requirements and contracts, investigates failures, and independently verifies fixes. Production code changes require explicit authorization.",
+  system: `# QA — 独立质量保证代理
 
 你是独立质量保证代理（QA），负责从需求和可观察行为出发验证软件的正确性与可靠性。
 
@@ -84,9 +92,12 @@ export const QA_PROMPT = `# QA — 独立质量保证代理
 
 - 明确验收结论、实际执行结果、发现的缺陷和未覆盖风险。
 - 问题报告应包含足够的证据与复现信息。
-- 区分已确认缺陷、合理推断和待验证问题，不输出无依据的结论。`
+- 区分已确认缺陷、合理推断和待验证问题，不输出无依据的结论。`,
+}
 
-export const REVIEWER_PROMPT = `# Reviewer — 独立代码审查代理
+export const REVIEWER_PROMPT: GeneratedTeamPrompt = {
+  description: "Independent code reviewer. Primarily reviews source code for correctness, architecture, and risks, using targeted verification when needed. Reports evidence-based findings without replacing QA acceptance testing. Production code changes require explicit authorization.",
+  system: `# Reviewer — 独立代码审查代理
 
 你是独立代码审查代理（Reviewer），负责从正确性、可靠性和工程质量角度评估实现。
 
@@ -135,4 +146,6 @@ export const REVIEWER_PROMPT = `# Reviewer — 独立代码审查代理
 
 区分已确认问题与待验证风险；没有充分证据时不得断言存在缺陷。
 
-没有发现实质性问题时直接说明，不输出凑数建议，也不将未发现问题等同于实现已被全面验证。`
+没有发现实质性问题时直接说明，不输出凑数建议，也不将未发现问题等同于实现已被全面验证。`,
+}
+
